@@ -153,10 +153,12 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
         AiTaskStatusVO status = task.getStatus();
 
         if (status == AiTaskStatusVO.PENDING || status == AiTaskStatusVO.RETRYING) {
-            // 排队/重试中：返回 409，前端用轮询
-            emitter.completeWithError(new AppException(ResponseCode.E0001.getCode(),
-                    "任务尚未开始执行，请继续轮询 (status=" + status.getCode() + ")"));
-            return emitter;
+            // 排队/重试中：先给前端一条 pending 状态事件，再进入订阅循环等待任务被 Consumer 抢占
+            log.info("SSE 建立时任务仍在排队 taskId={} status={}", taskId, status.getCode());
+            String pendingLabel = status == AiTaskStatusVO.PENDING
+                    ? "任务已提交，正在排队等待执行..."
+                    : "任务执行失败，正在重试...";
+            sendEvent(emitter, statusEvent("pending", pendingLabel));
         }
 
         if (status == AiTaskStatusVO.SUCCESS) {
@@ -176,7 +178,7 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
             return emitter;
         }
 
-        // RUNNING: 订阅 Redis Stream 实时事件
+        // RUNNING / PENDING / RETRYING: 订阅 Redis Stream 实时事件，循环体内会自动等待状态转到 RUNNING/SUCCESS/FAILED
         sseConnections.put(taskId, emitter);
 
         emitter.onCompletion(() -> { completed.set(true); sseConnections.remove(taskId); });
@@ -341,6 +343,10 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
 
     private AiWritingStreamEventDTO resultEvent(String content) {
         return buildStreamDTO("done", "result", content);
+    }
+
+    private AiWritingStreamEventDTO statusEvent(String phase, String content) {
+        return buildStreamDTO(phase, "status", content);
     }
 
     private AiWritingStreamEventDTO doneEvent() {

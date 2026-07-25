@@ -58,6 +58,11 @@ public class ChatService implements IChatService {
 
     @Override
     public String createSession(String agentId, String userId) {
+        return createSession(agentId, userId, true);
+    }
+
+    @Override
+    public String createSession(String agentId, String userId, boolean recoverHistory) {
         AiAgentRegisterVO aiAgentRegisterVO = defaultArmoryFactory.getAiAgentRegisterVO(agentId);
 
         if (null == aiAgentRegisterVO) {
@@ -75,8 +80,10 @@ public class ChatService implements IChatService {
         String cacheKey = userId + "_" + agentId;
         userSessions.put(cacheKey, sessionId);
         
-        // 注入历史对话上下文
-        recoverHistoryContext(userId, agentId, null, aiAgentRegisterVO, sessionId);
+        // 注入历史对话上下文（一次性写作任务应跳过，避免历史正文污染上下文）
+        if (recoverHistory) {
+            recoverHistoryContext(userId, agentId, null, aiAgentRegisterVO, sessionId);
+        }
         
         return sessionId;
     }

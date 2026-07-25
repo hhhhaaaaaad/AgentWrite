@@ -6,6 +6,8 @@ import cn.sutone.ai.domain.agent.model.valobj.AiWritingStreamEventVO;
 import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownBlockRenderer;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
 import cn.sutone.ai.types.enums.ResponseCode;
 import cn.sutone.ai.types.exception.AppException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -52,9 +54,11 @@ public class AgentWritingRunner {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final IChatService chatService;
+    private final AiWritingTaskStrategyResolver strategyResolver;
 
-    public AgentWritingRunner(IChatService chatService) {
+    public AgentWritingRunner(IChatService chatService, AiWritingTaskStrategyResolver strategyResolver) {
         this.chatService = chatService;
+        this.strategyResolver = strategyResolver;
     }
 
     /**
@@ -63,18 +67,22 @@ public class AgentWritingRunner {
      * @return 格式化后的完整文章内容
      */
     public String run(AiTaskEntity task, Consumer<AiWritingStreamEventVO> eventConsumer) {
+        AiWritingTaskStrategy strategy = strategyResolver.resolve(task);
         String agentId = resolveAgentId();
         String userId = String.valueOf(task.getUserId());
-        String sessionId = chatService.createSession(agentId, userId);
+        // 快捷操作为一次性任务，使用无历史会话，避免历史正文污染上下文导致模型返回对话式回复
+        String sessionId = chatService.createSession(agentId, userId, false);
         StringBuilder responseBuilder = new StringBuilder();
         StringBuilder reviewerLineBuffer = new StringBuilder();
-        boolean enableIllustration = Boolean.TRUE.equals(task.getEnableIllustration());
+        boolean useReviewer = strategy.useReviewer();
+        boolean enableIllustration = strategy.enableIllustration();
 
         Flowable<Event> events = chatService.handleMessageStream(agentId, userId, sessionId, task.getPromptPayload());
         String[] currentPhase = {null};
         events.blockingForEach(event -> {
             if (!event.functionCalls().isEmpty() || !event.functionResponses().isEmpty()) return;
             String author = event.author();
+            if (!useReviewer && AUTHOR_REVIEWER.equals(author)) return;
             String newPhase = AUTHOR_PHASE_MAP.getOrDefault(author, "thinking");
             if (!Objects.equals(newPhase, currentPhase[0])) {
                 currentPhase[0] = newPhase;
@@ -84,26 +92,22 @@ public class AgentWritingRunner {
             String content = event.stringifyContent();
             if (null == content || content.isBlank()) return;
             if (AUTHOR_ANALYST.equals(author)) return;
+            if (!useReviewer) {
+                if (AUTHOR_GENERATOR.equals(author)) {
+                    responseBuilder.append(content);
+                    eventConsumer.accept(tokenEvent(newPhase, content));
+                }
+                return;
+            }
             if (AUTHOR_GENERATOR.equals(author)) {
                 eventConsumer.accept(tokenEvent(newPhase, content));
                 return;
             }
-            boolean isPartial = event.partial().orElse(false);
+            // reviewer：累积全部原始输出，待流结束后按块解析（对块内杂散换行免疫）
             reviewerLineBuffer.append(content);
-            if (isPartial && reviewerLineBuffer.indexOf("\n") < 0) return;
-            String accumulated = reviewerLineBuffer.toString();
-            String[] lines = accumulated.split("\n", -1);
-            int processUpTo = isPartial ? lines.length - 1 : lines.length;
-            reviewerLineBuffer.setLength(0);
-            if (isPartial && lines.length > 0 && !lines[lines.length - 1].isEmpty()) {
-                reviewerLineBuffer.append(lines[lines.length - 1]);
-            }
-            for (int i = 0; i < processUpTo; i++) {
-                consumeReviewerLine(newPhase, lines[i], responseBuilder, eventConsumer);
-            }
         });
-        if (reviewerLineBuffer.length() > 0) {
-            consumeReviewerLine("reviewing", reviewerLineBuffer.toString(), responseBuilder, eventConsumer);
+        if (useReviewer && reviewerLineBuffer.length() > 0) {
+            renderReviewerBlocks(reviewerLineBuffer.toString(), responseBuilder, eventConsumer);
         }
 
         // 配图
@@ -123,7 +127,7 @@ public class AgentWritingRunner {
             }
         }
 
-        return formatMarkdown(responseBuilder.toString());
+        return formatMarkdown(responseBuilder.toString(), strategy);
     }
 
     // ==================== 私有方法 (从 AiWritingService 迁移) ====================
@@ -142,7 +146,7 @@ public class AgentWritingRunner {
 
     private List<IllustrationRequest> analyzeIllustrations(Long userId, String articleContent) {
         String prompt = buildIllustrationPrompt(articleContent);
-        String sessionId = chatService.createSession(ILLUSTRATION_AGENT_ID, String.valueOf(userId));
+        String sessionId = chatService.createSession(ILLUSTRATION_AGENT_ID, String.valueOf(userId), false);
         List<String> outputs = chatService.handleMessage(ILLUSTRATION_AGENT_ID, String.valueOf(userId), sessionId, prompt);
         List<IllustrationRequest> requests = new ArrayList<>();
         for (String line : outputs) {
@@ -175,7 +179,7 @@ public class AgentWritingRunner {
     }
 
     private String generateIllustration(Long userId, IllustrationRequest req) {
-        String drawSessionId = chatService.createSession(DRAWIO_AGENT_ID, String.valueOf(userId));
+        String drawSessionId = chatService.createSession(DRAWIO_AGENT_ID, String.valueOf(userId), false);
         String drawPrompt = """
                 请根据以下绘图需求，生成一个 draw.io 图表。
                 图表类型：%s
@@ -251,27 +255,37 @@ public class AgentWritingRunner {
         return -1;
     }
 
-    private void consumeReviewerLine(String phase, String line, StringBuilder responseBuilder,
-                                     Consumer<AiWritingStreamEventVO> eventConsumer) {
-        if (null == line) return;
-        if (line.isBlank()) {
-            responseBuilder.append("\n");
-            eventConsumer.accept(tokenEvent(phase, "\n"));
+    /**
+     * 将 reviewer 的完整原始输出解析为结构化块并渲染为标准 Markdown。
+     *
+     * <p>按花括号配对提取顶层 JSON 对象，对每个对象剔除杂散的真实换行（模型常在「1.\n1」这类位置
+     * 插入换行，破坏 JSON 与编号），再交由 {@link MarkdownBlockRenderer} 确定性渲染。
+     * 若未解析出任何块（模型未按协议输出），回退为把原文当作 Markdown 直接落库。</p>
+     */
+    private void renderReviewerBlocks(String raw, StringBuilder responseBuilder,
+                                      Consumer<AiWritingStreamEventVO> eventConsumer) {
+        List<String> objects = MarkdownBlockRenderer.extractTopLevelObjects(raw);
+        if (objects.isEmpty()) {
+            String fallback = raw.strip();
+            if (!fallback.isEmpty()) {
+                responseBuilder.append(fallback).append("\n");
+                eventConsumer.accept(tokenEvent("reviewing", fallback));
+            }
             return;
         }
-        if (MarkdownBlockRenderer.isBlockLine(line)) {
-            String fragment = MarkdownBlockRenderer.renderLine(line);
-            if (null == fragment || fragment.isEmpty()) return;
+        for (String obj : objects) {
+            // 剔除对象内部的真实回车换行（杂散换行），保留代码块里被转义的 \n 序列
+            String cleaned = obj.replaceAll("[\\r\\n]", "");
+            if (!MarkdownBlockRenderer.isBlockLine(cleaned)) continue;
+            String fragment = MarkdownBlockRenderer.renderLine(cleaned);
+            if (null == fragment || fragment.isEmpty()) continue;
             responseBuilder.append(fragment).append("\n\n");
-            eventConsumer.accept(tokenEvent(phase, fragment + "\n\n", line.trim()));
-        } else {
-            responseBuilder.append(line).append("\n");
-            eventConsumer.accept(tokenEvent(phase, line + "\n"));
+            eventConsumer.accept(tokenEvent("reviewing", fragment + "\n\n", cleaned));
         }
     }
 
-    private String formatMarkdown(String raw) {
-        return MarkdownNormalizer.normalize(raw);
+    private String formatMarkdown(String raw, AiWritingTaskStrategy strategy) {
+        return MarkdownNormalizer.normalize(raw, strategy.markdownPolicy());
     }
 
     private AiWritingStreamEventVO statusEvent(String phase, String content) {

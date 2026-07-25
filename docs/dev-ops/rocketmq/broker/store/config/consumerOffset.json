@@ -1,9 +1,16 @@
 {
 	"dataVersion":{
-		"counter":0,
+		"counter":28,
 		"stateVersion":0,
-		"timestamp":1784785050216
+		"timestamp":1784976900147
 	},
-	"groupTopicMap":{},
-	"offsetTable":{}
+	"groupTopicMap":{
+		"ai-writing-worker-group":["%RETRY%ai-writing-worker-group","ai-writing-task"]
+	},
+	"offsetTable":{
+		"ai-writing-task@ai-writing-worker-group":{0:3,1:4,2:5,3:5
+		},
+		"%RETRY%ai-writing-worker-group@ai-writing-worker-group":{0:1
+		}
+	}
 }

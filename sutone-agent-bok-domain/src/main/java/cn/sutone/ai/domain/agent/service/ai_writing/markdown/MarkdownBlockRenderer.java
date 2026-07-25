@@ -56,6 +56,70 @@ public final class MarkdownBlockRenderer {
     }
 
     /**
+     * 从一段可能包含多个块、且块内可能被模型插入了杂散换行的原始文本中，
+     * 按花括号配对（感知字符串与转义）提取所有顶层 JSON 对象字符串。
+     *
+     * <p>用于流式结构化输出：模型有时会在 JSON 内部插入真实换行（如「1.\n1」），
+     * 破坏"一行一个 JSON"的假设。此方法不依赖换行切分，而是靠括号平衡切分，
+     * 因此对块内换行免疫。</p>
+     */
+    public static List<String> extractTopLevelObjects(String raw) {
+        List<String> result = new ArrayList<>();
+        if (null == raw || raw.isEmpty()) {
+            return result;
+        }
+        int i = 0;
+        int n = raw.length();
+        while (i < n) {
+            if (raw.charAt(i) == '{') {
+                int end = matchBrace(raw, i);
+                if (end < 0) {
+                    break; // 尾部对象不完整
+                }
+                result.add(raw.substring(i, end + 1));
+                i = end + 1;
+            } else {
+                i++;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 从 start 处的 '{' 开始，返回与之配对的 '}' 的下标；感知 JSON 字符串与转义，
+     * 字符串内部的花括号/换行不参与配对。找不到返回 -1。
+     */
+    private static int matchBrace(String s, int start) {
+        int depth = 0;
+        boolean inStr = false;
+        boolean esc = false;
+        for (int i = start; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inStr) {
+                if (esc) {
+                    esc = false;
+                } else if (c == '\\') {
+                    esc = true;
+                } else if (c == '"') {
+                    inStr = false;
+                }
+            } else {
+                if (c == '"') {
+                    inStr = true;
+                } else if (c == '{') {
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        return i;
+                    }
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
      * 把一行块 JSON 渲染成标准 Markdown 片段（不含前后空行，由调用方用 \n\n 拼接）。
      *
      * @param line 单行块 JSON

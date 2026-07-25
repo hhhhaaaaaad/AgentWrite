@@ -17,6 +17,15 @@ public interface IChatService {
 
     String createSession(String agentId, String userId);
 
+    /**
+     * 创建会话。
+     *
+     * @param recoverHistory 是否注入该 user+agent 的历史对话上下文。
+     *                       多轮对话场景传 true；AI 写作快捷操作等一次性任务应传 false，
+     *                       避免历史正文污染上下文导致模型误判"文章已完整"而返回对话式回复。
+     */
+    String createSession(String agentId, String userId, boolean recoverHistory);
+
     List<String> handleMessage(String agentId, String userId, String message);
 
     List<String> handleMessage(String agentId, String userId, String sessionId, String message);

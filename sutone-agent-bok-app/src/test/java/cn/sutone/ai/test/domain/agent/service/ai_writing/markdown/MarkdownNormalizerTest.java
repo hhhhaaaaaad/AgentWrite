@@ -1,5 +1,6 @@
 package cn.sutone.ai.test.domain.agent.service.ai_writing.markdown;
 
+import cn.sutone.ai.domain.agent.model.valobj.MarkdownPolicyVO;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -137,5 +138,67 @@ class MarkdownNormalizerTest {
         // 不应把所有内容挤在一个段落
         String[] lines = result.split("\n");
         assertTrue(lines.length >= 4, "至少应拆为 4+ 行: 实际 " + lines.length + " 行\n" + result);
+    }
+
+    @Test
+    @DisplayName("PLAIN_TEXT 应去掉摘要标题和 Markdown 标记")
+    void shouldNormalizePlainTextPolicy() {
+        String raw = "## 摘要\n\n本文介绍 RocketMQ 的可靠投递机制。";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.PLAIN_TEXT);
+        assertEquals("本文介绍 RocketMQ 的可靠投递机制。", result);
+    }
+
+    @Test
+    @DisplayName("PLAIN_LINES 应清理标题候选的编号和 Markdown 标记")
+    void shouldNormalizePlainLinesPolicy() {
+        String raw = "1. # 多 Agent 写作系统实践\n2. 从同步生成到异步任务";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.PLAIN_LINES);
+        assertEquals("多 Agent 写作系统实践\n从同步生成到异步任务", result);
+    }
+
+    @Test
+    @DisplayName("TAGS 应支持多分隔符切分、去重并清理标记")
+    void shouldNormalizeTagsPolicy() {
+        String raw = "#Java、Spring Boot，RocketMQ\nRedis, Java";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.TAGS);
+        assertEquals("Java, Spring Boot, RocketMQ, Redis", result);
+    }
+
+    @Test
+    @DisplayName("ARTICLE_LIGHT 不应执行标题层级强修正")
+    void shouldKeepHeadingLevelForArticleLightPolicy() {
+        String raw = "## 2.1 任务可靠投递";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.ARTICLE_LIGHT);
+        assertEquals("## 2.1 任务可靠投递", result);
+    }
+
+    @Test
+    @DisplayName("代码块语言标识与代码粘连应被拆行")
+    void shouldSplitCodeFenceLangFromCode() {
+        String raw = "```javapublic void execute() {}\n```";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.ARTICLE_STRICT);
+        assertTrue(result.contains("```java\npublic"), "语言标识后应换行: " + result);
+        assertFalse(result.contains("```javapublic"), "不应残留粘连: " + result);
+    }
+
+    @Test
+    @DisplayName("标题与正文粘连不应把标题词切碎或孤立 ### 标记")
+    void shouldNotCorruptGluedHeading() {
+        String raw = "##一、引言###1.1微服务架构背景2010年前后每个请求都需要异步处理多个子任务并复用线程";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.ARTICLE_STRICT);
+        // ## 应补空格并与后续标题分行
+        assertTrue(result.contains("## 一、引言"), "一级标题应规范化: " + result);
+        // 不应出现孤立的空标题标记「### 」独占一行
+        assertFalse(result.matches("(?s).*(^|\\n)#{2,6}\\s*\\n.*"), "不应产生空标题: " + result);
+        // 不应把「异步处理」切成「异步处 / 理」
+        assertFalse(result.contains("异步处\n"), "不应切在词中间: " + result);
+    }
+
+    @Test
+    @DisplayName("普通合法长标题不应被误拆")
+    void shouldNotSplitNormalHeading() {
+        String raw = "### 一、概述";
+        String result = MarkdownNormalizer.normalize(raw, MarkdownPolicyVO.ARTICLE_STRICT);
+        assertTrue(result.startsWith("### 一、概述"), "合法标题应保持: " + result);
     }
 }
