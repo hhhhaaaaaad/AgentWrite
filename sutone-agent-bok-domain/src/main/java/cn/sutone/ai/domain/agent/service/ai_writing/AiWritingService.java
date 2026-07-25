@@ -237,6 +237,8 @@ public class AiWritingService implements IAiWritingService {
             });
 
             aiTaskRepository.markSuccess(taskId, formattedContent);
+            // 补发权威终稿事件：前端据此采纳最终内容，避免拼接 generator/reviewer 多阶段 token 造成重复
+            taskEventPublisher.publish(taskId, resultEvent(formattedContent));
             taskEventPublisher.publishDone(taskId);
 
             // 异步触发记忆抽取
@@ -436,6 +438,9 @@ public class AiWritingService implements IAiWritingService {
                     你是一个高级技术写作 Agent。请基于当前草稿上下文续写正文，输出 Markdown 内容。
                     要求：保持技术准确、表达自然、结构连贯，不要重复已有正文，不要输出解释说明。
                     注意：不要输出文章标题（# xxx），标题已在草稿中，直接从 ## 或正文内容开始写。
+                    严禁输出任何对话式内容（如"文章已完整""如果你希望…""可以告诉我方向"之类），
+                    也不要输出建议清单或向用户提问；无论如何都只输出正文 Markdown 本身。
+                    若当前正文已较完整，则围绕现有大纲/章节补充细节、示例或代码，而不是回复"无需续写"。
                     %s
 
                     标题：%s
@@ -449,8 +454,8 @@ public class AiWritingService implements IAiWritingService {
                 boolean hasSelectedText = null != selectedText && !selectedText.isBlank();
                 String body = hasSelectedText ? selectedText : nullToEmpty(draft.getContentMd());
                 String desc = hasSelectedText
-                    ? "请对以下选中文本进行润色改写，只输出改写结果，不要输出解释说明。不要输出文章标题（# xxx）。"
-                    : "请对当前草稿进行智能处理：\n- 如果内容是**大纲/提纲**（标题多、正文少），请将每个章节展开为完整正文段落，保留原目录结构；\n- 如果已是完整正文，则优化表达质量和阅读流畅度。\n要求：不要输出解释说明。不要输出文章标题（# xxx），标题已在草稿中。";
+                    ? "【处理范围】选中文本\n请只对以下选中文本进行润色改写，只输出可替换选中文本的改写结果，不要输出解释说明。不要添加标题、列表或章节，除非原文已有对应结构。"
+                    : "【处理范围】全文草稿\n请对当前草稿进行润色改写，保留原有结构、标题层级和段落顺序。只优化表达质量和阅读流畅度，不得把大纲扩写为正文，不得新增章节。要求：不要输出解释说明，不要输出文章标题（# xxx），标题已在草稿中。";
                 yield memoryPrefix + """
                     你是一个高级技术写作 Agent。%s
                     %s

@@ -1,5 +1,6 @@
 package cn.sutone.ai.domain.agent.service.ai_writing.markdown;
 
+import cn.sutone.ai.domain.agent.model.valobj.MarkdownPolicyVO;
 import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.node.AbstractVisitor;
 import org.commonmark.node.Heading;
@@ -8,7 +9,10 @@ import org.commonmark.node.Text;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.markdown.MarkdownRenderer;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -62,6 +66,101 @@ public final class MarkdownNormalizer {
             // 解析异常时降级为预处理结果，保证永不抛出
             return pre.strip();
         }
+    }
+
+    public static String normalize(String raw, MarkdownPolicyVO policy) {
+        if (null == raw || raw.isBlank()) {
+            return raw;
+        }
+        MarkdownPolicyVO safePolicy = null == policy ? MarkdownPolicyVO.ARTICLE_STRICT : policy;
+        return switch (safePolicy) {
+            case NONE -> raw;
+            case PLAIN_TEXT -> normalizePlainText(raw);
+            case PLAIN_LINES -> normalizePlainLines(raw);
+            case TAGS -> normalizeTags(raw);
+            case INLINE_LIGHT -> normalizeInlineLight(raw);
+            case OUTLINE_LIGHT, ARTICLE_LIGHT, REPORT_LIGHT -> normalizeMarkdownLight(raw);
+            case ARTICLE_STRICT -> normalize(raw);
+        };
+    }
+
+    private static String normalizePlainText(String raw) {
+        String text = stripMarkdownFence(removeConversationalPrefix(raw));
+        StringBuilder sb = new StringBuilder();
+        for (String line : text.split("\\n", -1)) {
+            String cleaned = line.strip()
+                    .replaceAll("^#{1,6}\\s*", "")
+                    .replaceAll("^[-*+]\\s+", "")
+                    .replaceAll("^\\d+[.)、]\\s*", "")
+                    .strip();
+            if (cleaned.isBlank() || isPlainTextHeading(cleaned)) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append(cleaned);
+        }
+        return sb.toString().replaceAll("\\n{3,}", "\n\n").strip();
+    }
+
+    private static String normalizePlainLines(String raw) {
+        String text = stripMarkdownFence(removeConversationalPrefix(raw));
+        List<String> lines = new ArrayList<>();
+        for (String line : text.split("\\n")) {
+            String cleaned = line.strip()
+                    .replaceAll("^[-*+]\\s+", "")
+                    .replaceAll("^\\d+[.)、]\\s*", "")
+                    .replaceAll("^#{1,6}\\s*", "")
+                    .strip();
+            if (!cleaned.isBlank()) {
+                lines.add(cleaned);
+            }
+            if (lines.size() >= 5) {
+                break;
+            }
+        }
+        return String.join("\n", lines);
+    }
+
+    private static String normalizeTags(String raw) {
+        String text = stripMarkdownFence(removeConversationalPrefix(raw));
+        String[] parts = text.split("[，,、;；\\n]");
+        Set<String> tags = new LinkedHashSet<>();
+        for (String part : parts) {
+            String tag = part.strip()
+                    .replaceAll("^[-*+]\\s+", "")
+                    .replaceAll("^\\d+[.)、]\\s*", "")
+                    .replaceAll("^#+", "")
+                    .strip();
+            if (!tag.isBlank()) {
+                tags.add(tag);
+            }
+            if (tags.size() >= 5) {
+                break;
+            }
+        }
+        return String.join(", ", tags);
+    }
+
+    private static String normalizeInlineLight(String raw) {
+        return finalCleanup(stripMarkdownFence(removeConversationalPrefix(raw))).strip();
+    }
+
+    private static String normalizeMarkdownLight(String raw) {
+        return finalCleanup(preprocess(raw)).strip();
+    }
+
+    private static String stripMarkdownFence(String raw) {
+        return raw.replaceAll("(?s)^```(?:markdown|md)?\\s*\\n(.*)\\n```\\s*$", "$1");
+    }
+
+    private static String removeConversationalPrefix(String raw) {
+        return raw.replaceFirst("(?s)^\\s*(以下是|下面是|这是|为你生成的|根据.*?生成的)[^\\n]*[:：]\\s*", "");
+    }
+
+    private static boolean isPlainTextHeading(String text) {
+        return "摘要".equals(text) || "文章摘要".equals(text) || "总结".equals(text);
     }
 
     /**
@@ -135,10 +234,6 @@ public final class MarkdownNormalizer {
         //    如「### 6.3直接内存的优缺点与调优**优点：**」→ 拆为标题 + 正文
         result = result.replaceAll("(?m)^(#{1,6}\\s+[^\\n]{2,60}?)(\\*\\*[^\\n]+)$", "$1\n\n$2");
 
-        // 8b. 标题行超长兜底（>65 字符）：把尾部文字拆为正文段落
-        //     标题持有最多 45 字符（约 22 个中文字），剩余 20+ 字符独立成段
-        result = result.replaceAll("(?m)^(#{1,6}\\s[^\\n]{1,45})([^\\n]{20,})$", "$1\n\n$2");
-
         // 9. 标题与表格粘连：标题行末尾直接跟 | 表头
         result = result.replaceAll("(?m)^(#{1,6}\\s+[^\\n|]+)(\\|[^\\n]+\\|)$", "$1\n\n$2");
 
@@ -160,6 +255,13 @@ public final class MarkdownNormalizer {
 
         // 15. <br /> 标签清除（模型偶尔输出 HTML 换行标签）
         result = result.replaceAll("(?i)<br\\s*/?>", "\n");
+
+        // 16. 代码块围栏语言标识与代码粘连：「```javapublic ...」→「```java\npublic ...」
+        //     模型常把语言标识和首行代码写在同一行，导致 CommonMark 把 javapublic 当成语言标识。
+        //     仅对常见语言做拆分；语言后紧跟非空白内容时，在语言标识后补换行。
+        result = result.replaceAll(
+                "(?m)^(\\s*```)(javascript|typescript|kotlin|python|properties|yaml|bash|shell|json|html|java|rust|yml|sql|xml|css|cpp|go|js|ts|py|sh|c)(\\S.*)$",
+                "$1$2\n$3");
 
         return result;
     }
