@@ -12,6 +12,9 @@ import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ITaskEventPublisher;
 import cn.sutone.ai.domain.agent.service.ai_writing.AgentWritingRunner;
 import cn.sutone.ai.domain.agent.service.ai_writing.AiWritingService;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
+import cn.sutone.ai.domain.agent.model.valobj.MarkdownPolicyVO;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
 import cn.sutone.ai.domain.agent.service.ratelimit.RateLimitService;
 import cn.sutone.ai.domain.content.model.entity.DraftEntity;
@@ -77,6 +80,9 @@ class AiWritingServiceTest {
     private ITaskEventPublisher taskEventPublisher;
 
     @Mock
+    private AiWritingTaskStrategyResolver strategyResolver;
+
+    @Mock
     private RLock rLock;
 
     private AiWritingService aiWritingService;
@@ -90,7 +96,7 @@ class AiWritingServiceTest {
     void setUp() throws InterruptedException {
         aiWritingService = new AiWritingService(chatService, aiTaskRepository, outboxEventRepository,
                 draftDomainService, rateLimitService, redissonClient, memoryManager,
-                agentWritingRunner, taskEventPublisher);
+                agentWritingRunner, taskEventPublisher, strategyResolver);
         lenient().when(rateLimitService.tryAcquire(anyLong())).thenReturn(true);
         lenient().when(redissonClient.getLock(anyString())).thenReturn(rLock);
         lenient().when(rLock.tryLock(0, 5, TimeUnit.SECONDS)).thenReturn(true);

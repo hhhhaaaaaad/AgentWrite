@@ -14,30 +14,33 @@ public class AiWritingTaskStrategyResolver {
     public AiWritingTaskStrategy resolve(AiTaskEntity task) {
         AiWritingTaskTypeVO taskType = task.getTaskType();
         return switch (taskType) {
-            case GENERATE_OUTLINE -> strategy(false, MarkdownPolicyVO.OUTLINE_LIGHT, false);
-            case GENERATE_BODY -> strategy(true, MarkdownPolicyVO.ARTICLE_STRICT, task.getEnableIllustration());
+            // 短文本任务：单 Agent 直调，不走 3 阶段 workflow
+            case GENERATE_OUTLINE  -> AiWritingTaskStrategy.singleAgent(MarkdownPolicyVO.OUTLINE_LIGHT);
+            case SUMMARIZE         -> AiWritingTaskStrategy.singleAgent(MarkdownPolicyVO.PLAIN_TEXT);
+            case GENERATE_TITLE    -> AiWritingTaskStrategy.singleAgent(MarkdownPolicyVO.PLAIN_LINES);
+            case GENERATE_TAGS     -> AiWritingTaskStrategy.singleAgent(MarkdownPolicyVO.TAGS);
+            case QUALITY_CHECK     -> AiWritingTaskStrategy.singleAgent(MarkdownPolicyVO.REPORT_LIGHT);
+
+            // 正文类任务：走 3 阶段 workflow（analyst → generator → reviewer）
+            case GENERATE_BODY -> AiWritingTaskStrategy.workflow(
+                    MarkdownPolicyVO.ARTICLE_STRICT, task.getEnableIllustration());
+
             case POLISH_TEXT -> resolvePolishText(task);
-            case SUMMARIZE -> strategy(false, MarkdownPolicyVO.PLAIN_TEXT, false);
-            case GENERATE_TITLE -> strategy(false, MarkdownPolicyVO.PLAIN_LINES, false);
-            case GENERATE_TAGS -> strategy(false, MarkdownPolicyVO.TAGS, false);
-            case QUALITY_CHECK -> strategy(false, MarkdownPolicyVO.REPORT_LIGHT, false);
         };
     }
 
     private AiWritingTaskStrategy resolvePolishText(AiTaskEntity task) {
         if (hasSelectedText(task)) {
-            return strategy(false, MarkdownPolicyVO.INLINE_LIGHT, false);
+            // 局部润色：短文本，单 Agent 直调
+            return AiWritingTaskStrategy.singleAgent(MarkdownPolicyVO.INLINE_LIGHT);
         }
-        // 全文润色输出的是完整文章，需要 AST 级块结构治理
-        return strategy(true, MarkdownPolicyVO.ARTICLE_STRICT, task.getEnableIllustration());
+        // 全文润色：输出完整文章，需要 AST 级块结构治理，走 workflow
+        return AiWritingTaskStrategy.workflow(
+                MarkdownPolicyVO.ARTICLE_STRICT, task.getEnableIllustration());
     }
 
     private boolean hasSelectedText(AiTaskEntity task) {
         String promptPayload = task.getPromptPayload();
         return null != promptPayload && promptPayload.contains("【处理范围】选中文本");
-    }
-
-    private AiWritingTaskStrategy strategy(boolean useReviewer, MarkdownPolicyVO markdownPolicy, Boolean enableIllustration) {
-        return new AiWritingTaskStrategy(useReviewer, markdownPolicy, Boolean.TRUE.equals(enableIllustration));
     }
 }

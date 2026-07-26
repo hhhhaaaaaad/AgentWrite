@@ -19,6 +19,7 @@ spring:
       - classpath:agent/agent-illustration-analysis.yml
       - classpath:agent/agent-writing.yml
       - classpath:agent/agent-writing-chat.yml
+      - classpath:agent/agent-writing-single.yml
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}

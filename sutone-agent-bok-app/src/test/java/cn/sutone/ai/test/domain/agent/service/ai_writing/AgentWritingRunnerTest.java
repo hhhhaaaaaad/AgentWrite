@@ -1,7 +1,6 @@
 package cn.sutone.ai.test.domain.agent.service.ai_writing;
 
 import cn.sutone.ai.domain.agent.model.entity.AiTaskEntity;
-import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingTaskTypeVO;
 import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ai_writing.AgentWritingRunner;
@@ -17,8 +16,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Collections;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -30,7 +27,8 @@ class AgentWritingRunnerTest {
 
     private static final Long USER_ID = 10001L;
     private static final Long DRAFT_ID = 20001L;
-    private static final String AGENT_ID = "300002";
+    private static final String WORKFLOW_AGENT_ID = "300002";
+    private static final String SINGLE_AGENT_ID = "300005";
 
     @Mock
     private IChatService chatService;
@@ -40,41 +38,34 @@ class AgentWritingRunnerTest {
     @BeforeEach
     void setUp() {
         runner = new AgentWritingRunner(chatService, new AiWritingTaskStrategyResolver());
-        AiAgentConfigTableVO.Agent agent = new AiAgentConfigTableVO.Agent();
-        agent.setAgentId(AGENT_ID);
-        lenient().when(chatService.queryAiAgentConfigList()).thenReturn(Collections.singletonList(agent));
-        lenient().when(chatService.createSession(eq(AGENT_ID), eq(String.valueOf(USER_ID)), eq(false))).thenReturn("session-1");
+        lenient().when(chatService.createSession(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq(false)))
+                .thenReturn("session-wf");
+        lenient().when(chatService.createSession(eq(SINGLE_AGENT_ID), eq(String.valueOf(USER_ID)), eq(false)))
+                .thenReturn("session-single");
     }
 
     @Test
-    @DisplayName("短文本任务应使用 generator 输出并忽略 reviewer 改写")
-    void shouldUseGeneratorOutputForShortTextTask() {
+    @DisplayName("短文本任务（SUMMARIZE）应使用单 Agent 300005 直调，不经过 workflow")
+    void shouldUseSingleAgentForShortTextTask() {
         AiTaskEntity task = AiTaskEntity.initPending(USER_ID, DRAFT_ID, AiWritingTaskTypeVO.SUMMARIZE, "测试 prompt", true);
-        Event analystEvent = Event.builder()
-                .author("agent_writing_analyst")
-                .content(Content.fromParts(Part.fromText("分析过程")))
+        Event singleAgentEvent = Event.builder()
+                .author("agent_writing_single")
+                .content(Content.fromParts(Part.fromText("本文介绍 RocketMQ 的可靠投递机制。")))
                 .build();
-        Event generatorEvent = Event.builder()
-                .author("agent_writing_generator")
-                .content(Content.fromParts(Part.fromText("## 摘要\n\n本文介绍 RocketMQ 的可靠投递机制。")))
-                .build();
-        Event reviewerEvent = Event.builder()
-                .author("agent_writing_reviewer")
-                .content(Content.fromParts(Part.fromText("被 reviewer 改写后的内容")))
-                .build();
-        when(chatService.handleMessageStream(eq(AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-1"), anyString()))
-                .thenReturn(Flowable.just(analystEvent, generatorEvent, reviewerEvent));
+        when(chatService.handleMessageStream(eq(SINGLE_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-single"), anyString()))
+                .thenReturn(Flowable.just(singleAgentEvent));
 
-        String result = runner.run(task, event -> { });
+        String result = runner.run(task, event -> {});
 
         assertEquals("本文介绍 RocketMQ 的可靠投递机制。", result);
-        assertFalse(result.contains("reviewer"));
-        verify(chatService, never()).handleMessage(eq("300003"), eq(String.valueOf(USER_ID)), anyString(), anyString());
+        // 验证未调用 workflow agent 和配图 agent
+        verify(chatService, never()).handleMessageStream(eq(WORKFLOW_AGENT_ID), anyString(), anyString(), anyString());
+        verify(chatService, never()).handleMessage(eq("300003"), anyString(), anyString(), anyString());
     }
 
     @Test
-    @DisplayName("正文任务仍应使用 reviewer 输出作为最终内容")
-    void shouldUseReviewerOutputForArticleTask() {
+    @DisplayName("正文任务（GENERATE_BODY）仍应使用 workflow agent 300002")
+    void shouldUseWorkflowForArticleTask() {
         AiTaskEntity task = AiTaskEntity.initPending(USER_ID, DRAFT_ID, AiWritingTaskTypeVO.GENERATE_BODY, "测试 prompt", false);
         Event generatorEvent = Event.builder()
                 .author("agent_writing_generator")
@@ -84,10 +75,10 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_reviewer")
                 .content(Content.fromParts(Part.fromText("reviewer 终稿")))
                 .build();
-        when(chatService.handleMessageStream(eq(AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-1"), anyString()))
+        when(chatService.handleMessageStream(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString()))
                 .thenReturn(Flowable.just(generatorEvent, reviewerEvent));
 
-        String result = runner.run(task, event -> { });
+        String result = runner.run(task, event -> {});
 
         assertEquals("reviewer 终稿", result);
         assertFalse(result.contains("generator 初稿"));
@@ -104,14 +95,13 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_reviewer")
                 .content(Content.fromParts(Part.fromText(blocks)))
                 .build();
-        when(chatService.handleMessageStream(eq(AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-1"), anyString()))
+        when(chatService.handleMessageStream(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString()))
                 .thenReturn(Flowable.just(reviewerEvent));
 
-        String result = runner.run(task, event -> { });
+        String result = runner.run(task, event -> {});
 
         assertTrue(result.contains("### 2.1 单体架构的演进"), "应渲染为三级标题: " + result);
         assertTrue(result.contains("单体架构并非一无是处"), "应包含正文: " + result);
-        // 标题行不应把正文吞进去
         String headingLine = result.lines().filter(l -> l.startsWith("#")).findFirst().orElse("");
         assertFalse(headingLine.contains("单体架构并非"), "标题行不应混入正文: " + headingLine);
         assertFalse(result.contains("md_heading"), "不应残留原始 JSON: " + result);
@@ -121,7 +111,6 @@ class AgentWritingRunnerTest {
     @DisplayName("块 JSON 内被模型插入杂散换行时，仍应正确渲染且不泄漏原始 JSON")
     void shouldRenderBlocksWithStrayNewlinesInsideJson() {
         AiTaskEntity task = AiTaskEntity.initPending(USER_ID, DRAFT_ID, AiWritingTaskTypeVO.GENERATE_BODY, "测试 prompt", false);
-        // 模拟模型在「1.1」处插入真实换行，把一个 JSON 对象拆成了两行
         String blocks = "{\"type\":\"md_heading\",\"level\":3,\"text\":\"1.\n1微服务架构背景\"}\n"
                 + "{\"type\":\"md_paragraph\",\"text\":\"过去十年间业务爆发式增长。\"}\n"
                 + "{\"type\":\"md_done\"}";
@@ -129,10 +118,10 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_reviewer")
                 .content(Content.fromParts(Part.fromText(blocks)))
                 .build();
-        when(chatService.handleMessageStream(eq(AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-1"), anyString()))
+        when(chatService.handleMessageStream(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString()))
                 .thenReturn(Flowable.just(reviewerEvent));
 
-        String result = runner.run(task, event -> { });
+        String result = runner.run(task, event -> {});
 
         assertFalse(result.contains("md_heading"), "不应泄漏原始 JSON: " + result);
         assertFalse(result.contains("\"type\""), "不应泄漏原始 JSON: " + result);

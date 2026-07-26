@@ -12,6 +12,8 @@ import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ITaskEventPublisher;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownBlockRenderer;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
 import cn.sutone.ai.domain.agent.service.ratelimit.RateLimitService;
 import cn.sutone.ai.domain.content.model.entity.DraftEntity;
@@ -75,12 +77,14 @@ public class AiWritingService implements IAiWritingService {
     private final MemoryManager memoryManager;
     private final AgentWritingRunner agentWritingRunner;
     private final ITaskEventPublisher taskEventPublisher;
+    private final AiWritingTaskStrategyResolver strategyResolver;
 
     public AiWritingService(IChatService chatService, IAiTaskRepository aiTaskRepository,
                             IOutboxEventRepository outboxEventRepository,
                             DraftDomainService draftDomainService, RateLimitService rateLimitService,
                             RedissonClient redissonClient, MemoryManager memoryManager,
-                            AgentWritingRunner agentWritingRunner, ITaskEventPublisher taskEventPublisher) {
+                            AgentWritingRunner agentWritingRunner, ITaskEventPublisher taskEventPublisher,
+                            AiWritingTaskStrategyResolver strategyResolver) {
         this.chatService = chatService;
         this.aiTaskRepository = aiTaskRepository;
         this.outboxEventRepository = outboxEventRepository;
@@ -90,6 +94,7 @@ public class AiWritingService implements IAiWritingService {
         this.memoryManager = memoryManager;
         this.agentWritingRunner = agentWritingRunner;
         this.taskEventPublisher = taskEventPublisher;
+        this.strategyResolver = strategyResolver;
     }
 
     @Override
@@ -241,9 +246,11 @@ public class AiWritingService implements IAiWritingService {
             taskEventPublisher.publish(taskId, resultEvent(formattedContent));
             taskEventPublisher.publishDone(taskId);
 
-            // 异步触发记忆抽取
-            String sessionId = chatService.createSession(WRITING_AGENT_ID, String.valueOf(task.getUserId()));
-            memoryManager.addAsync(task.getUserId(), Long.parseLong(WRITING_AGENT_ID), sessionId,
+            // 异步触发记忆抽取，使用策略中指定的实际 agentId
+            AiWritingTaskStrategy strategy = strategyResolver.resolve(task);
+            String memAgentId = strategy.agentId();
+            String sessionId = chatService.createSession(memAgentId, String.valueOf(task.getUserId()));
+            memoryManager.addAsync(task.getUserId(), Long.parseLong(memAgentId), sessionId,
                     List.of(Map.of("role", "user", "content", task.getPromptPayload()),
                             Map.of("role", "assistant", "content", formattedContent)));
 
