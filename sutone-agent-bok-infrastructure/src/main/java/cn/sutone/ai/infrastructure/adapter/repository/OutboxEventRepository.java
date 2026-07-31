@@ -78,6 +78,12 @@ public class OutboxEventRepository implements IOutboxEventRepository {
         return dao.countPublishableEvents();
     }
 
+    @Override
+    public OutboxEventEntity findLatestByAggregateId(Long aggregateId) {
+        OutboxEventPO po = dao.findLatestByAggregateId(aggregateId);
+        return toEntity(po);
+    }
+
     private OutboxEventPO toPO(OutboxEventEntity entity) {
         return OutboxEventPO.builder()
                 .eventId(entity.getEventId())

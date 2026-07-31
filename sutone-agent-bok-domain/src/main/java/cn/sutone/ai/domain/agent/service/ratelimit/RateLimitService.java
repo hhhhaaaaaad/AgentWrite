@@ -21,6 +21,7 @@ public class RateLimitService {
 
     public boolean tryAcquire(Long userId) {
         RRateLimiter limiter = redissonClient.getRateLimiter(RedisKeyConstants.RATE_LIMIT_PREFIX + userId);
+        // 每用户每分钟最多 5 次 AI 调用
         limiter.trySetRate(RateType.OVERALL, RATE, RATE_INTERVAL, RateIntervalUnit.MINUTES);
         return limiter.tryAcquire();
     }

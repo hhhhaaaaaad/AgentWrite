@@ -23,9 +23,12 @@ public class CustomConfigPlugin extends BasePlugin {
         super("CustomConfigPlugin");
     }
 
+    // 在模型调用之前执行的回调方法
     @Override
     public Maybe<LlmResponse> beforeModelCallback(CallbackContext context, LlmRequest.Builder requestBuilder) {
+        // 取自定义 API 配置管理器中的配置
         String sessionId = context.sessionId();
+        // 取配置
         CustomApiConfigManager.CustomApiConfig config = CustomApiConfigManager.getConfig(sessionId);
 
         if (config != null) {

@@ -1,15 +1,12 @@
 package cn.sutone.ai.domain.agent.service.ai_writing;
 
 import cn.sutone.ai.domain.agent.model.entity.AiTaskEntity;
-import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingStreamEventVO;
 import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownBlockRenderer;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
 import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
 import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
-import cn.sutone.ai.types.enums.ResponseCode;
-import cn.sutone.ai.types.exception.AppException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.adk.events.Event;
@@ -32,7 +29,6 @@ import java.util.function.Consumer;
 @Component
 public class AgentWritingRunner {
 
-    private static final String WRITING_AGENT_ID = "300002";
     private static final String DRAWIO_AGENT_ID = "300000";
     private static final String ILLUSTRATION_AGENT_ID = "300003";
     private static final String AUTHOR_ANALYST = "agent_writing_analyst";
@@ -62,19 +58,33 @@ public class AgentWritingRunner {
     }
 
     /**
-     * 执行 Agent 编排，通过 eventConsumer 输出流式事件
+     * 执行 Agent 编排，通过 eventConsumer 输出流式事件。
+     * 根据策略分派到 workflow 路径或单 Agent 直调路径。
      *
      * @return 格式化后的完整文章内容
      */
     public String run(AiTaskEntity task, Consumer<AiWritingStreamEventVO> eventConsumer) {
         AiWritingTaskStrategy strategy = strategyResolver.resolve(task);
-        String agentId = resolveAgentId();
+        String agentId = strategy.agentId();
         String userId = String.valueOf(task.getUserId());
         // 快捷操作为一次性任务，使用无历史会话，避免历史正文污染上下文导致模型返回对话式回复
         String sessionId = chatService.createSession(agentId, userId, false);
+
+        if (strategy.useWorkflow()) {
+            return runWorkflow(agentId, userId, sessionId, task, strategy, eventConsumer);
+        } else {
+            return runSingleAgent(agentId, userId, sessionId, task, strategy, eventConsumer);
+        }
+    }
+
+    /**
+     * 多阶段 workflow 路径：analyst → generator → reviewer → 配图（可选）。
+     */
+    private String runWorkflow(String agentId, String userId, String sessionId,
+                               AiTaskEntity task, AiWritingTaskStrategy strategy,
+                               Consumer<AiWritingStreamEventVO> eventConsumer) {
         StringBuilder responseBuilder = new StringBuilder();
         StringBuilder reviewerLineBuffer = new StringBuilder();
-        boolean useReviewer = strategy.useReviewer();
         boolean enableIllustration = strategy.enableIllustration();
 
         Flowable<Event> events = chatService.handleMessageStream(agentId, userId, sessionId, task.getPromptPayload());
@@ -82,7 +92,6 @@ public class AgentWritingRunner {
         events.blockingForEach(event -> {
             if (!event.functionCalls().isEmpty() || !event.functionResponses().isEmpty()) return;
             String author = event.author();
-            if (!useReviewer && AUTHOR_REVIEWER.equals(author)) return;
             String newPhase = AUTHOR_PHASE_MAP.getOrDefault(author, "thinking");
             if (!Objects.equals(newPhase, currentPhase[0])) {
                 currentPhase[0] = newPhase;
@@ -92,13 +101,6 @@ public class AgentWritingRunner {
             String content = event.stringifyContent();
             if (null == content || content.isBlank()) return;
             if (AUTHOR_ANALYST.equals(author)) return;
-            if (!useReviewer) {
-                if (AUTHOR_GENERATOR.equals(author)) {
-                    responseBuilder.append(content);
-                    eventConsumer.accept(tokenEvent(newPhase, content));
-                }
-                return;
-            }
             if (AUTHOR_GENERATOR.equals(author)) {
                 eventConsumer.accept(tokenEvent(newPhase, content));
                 return;
@@ -106,11 +108,11 @@ public class AgentWritingRunner {
             // reviewer：累积全部原始输出，待流结束后按块解析（对块内杂散换行免疫）
             reviewerLineBuffer.append(content);
         });
-        if (useReviewer && reviewerLineBuffer.length() > 0) {
+        if (reviewerLineBuffer.length() > 0) {
             renderReviewerBlocks(reviewerLineBuffer.toString(), responseBuilder, eventConsumer);
         }
 
-        // 配图
+        // 配图（仅 workflow 模式启用）
         List<IllustrationRequest> illustrationRequests = enableIllustration
                 ? analyzeIllustrations(task.getUserId(), responseBuilder.toString()) : List.of();
         if (!illustrationRequests.isEmpty()) {
@@ -130,19 +132,31 @@ public class AgentWritingRunner {
         return formatMarkdown(responseBuilder.toString(), strategy);
     }
 
+    /**
+     * 单 Agent 直调路径：发送 prompt → 收集输出 → normalize → 返回。
+     * 适用于短文本任务（摘要/标题/标签/质量检查/大纲/局部润色）。
+     */
+    private String runSingleAgent(String agentId, String userId, String sessionId,
+                                  AiTaskEntity task, AiWritingTaskStrategy strategy,
+                                  Consumer<AiWritingStreamEventVO> eventConsumer) {
+        StringBuilder responseBuilder = new StringBuilder();
+        eventConsumer.accept(statusEvent("generating", "正在生成内容..."));
+
+        Flowable<Event> events = chatService.handleMessageStream(agentId, userId, sessionId, task.getPromptPayload());
+        events.blockingForEach(event -> {
+            if (!event.functionCalls().isEmpty() || !event.functionResponses().isEmpty()) return;
+            String content = event.stringifyContent();
+            if (null == content || content.isBlank()) return;
+            responseBuilder.append(content);
+            eventConsumer.accept(tokenEvent("generating", content));
+        });
+
+        return formatMarkdown(responseBuilder.toString(), strategy);
+    }
+
     // ==================== 私有方法 (从 AiWritingService 迁移) ====================
 
     private record IllustrationRequest(String anchor, String diagramType, String requirement) {}
-
-    private String resolveAgentId() {
-        List<AiAgentConfigTableVO.Agent> agents = chatService.queryAiAgentConfigList();
-        if (null == agents || agents.isEmpty()) throw new AppException(ResponseCode.E0001.getCode(), "没有可用的 Agent 配置");
-        return agents.stream()
-                .filter(a -> WRITING_AGENT_ID.equals(a.getAgentId()))
-                .findFirst()
-                .map(AiAgentConfigTableVO.Agent::getAgentId)
-                .orElseThrow(() -> new AppException(ResponseCode.E0001.getCode(), "未找到 AI 技术写作智能体配置"));
-    }
 
     private List<IllustrationRequest> analyzeIllustrations(Long userId, String articleContent) {
         String prompt = buildIllustrationPrompt(articleContent);

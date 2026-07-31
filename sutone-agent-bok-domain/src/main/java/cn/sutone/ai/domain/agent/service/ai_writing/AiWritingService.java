@@ -12,6 +12,8 @@ import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ITaskEventPublisher;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownBlockRenderer;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
+import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
 import cn.sutone.ai.domain.agent.service.ratelimit.RateLimitService;
 import cn.sutone.ai.domain.content.model.entity.DraftEntity;
@@ -58,6 +60,11 @@ public class AiWritingService implements IAiWritingService {
     @Value("${ai-writing.mq.topic:ai-writing-task}")
     private String mqTopic;
 
+    /** 注入自身代理，解决 @Transactional 自调用不经过 AOP 代理的问题 */
+    @org.springframework.context.annotation.Lazy
+    @jakarta.annotation.Resource
+    private AiWritingService self;
+
     private static final Map<String, String> AUTHOR_PHASE_MAP = Map.of(
             AUTHOR_ANALYST, "analyzing", AUTHOR_GENERATOR, "generating", AUTHOR_REVIEWER, "reviewing");
     private static final Map<String, String> PHASE_LABEL_MAP = Map.of(
@@ -75,12 +82,16 @@ public class AiWritingService implements IAiWritingService {
     private final MemoryManager memoryManager;
     private final AgentWritingRunner agentWritingRunner;
     private final ITaskEventPublisher taskEventPublisher;
+    private final AiWritingTaskStrategyResolver strategyResolver;
+    private final cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher;
 
     public AiWritingService(IChatService chatService, IAiTaskRepository aiTaskRepository,
                             IOutboxEventRepository outboxEventRepository,
                             DraftDomainService draftDomainService, RateLimitService rateLimitService,
                             RedissonClient redissonClient, MemoryManager memoryManager,
-                            AgentWritingRunner agentWritingRunner, ITaskEventPublisher taskEventPublisher) {
+                            AgentWritingRunner agentWritingRunner, ITaskEventPublisher taskEventPublisher,
+                            AiWritingTaskStrategyResolver strategyResolver,
+                            cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher) {
         this.chatService = chatService;
         this.aiTaskRepository = aiTaskRepository;
         this.outboxEventRepository = outboxEventRepository;
@@ -90,43 +101,68 @@ public class AiWritingService implements IAiWritingService {
         this.memoryManager = memoryManager;
         this.agentWritingRunner = agentWritingRunner;
         this.taskEventPublisher = taskEventPublisher;
+        this.strategyResolver = strategyResolver;
+        this.outboxImmediatePublisher = outboxImmediatePublisher;
     }
 
     @Override
-    @Transactional
     public AiTaskEntity submitTask(Long userId, Long draftId, String taskTypeCode, Map<String, Object> promptParams, Boolean enableIllustration) {
+        // 1. redis限流器限流 每用户每分钟最多 5 次 AI 调用（快捷操作）
         if (!rateLimitService.tryAcquire(userId)) {
             throw new AppException(ResponseCode.E0001.getCode(), "AI 请求过于频繁，请稍后再试");
         }
+        // 2. 拼接分布式锁（5s 用户ID + 草稿ID + 任务类型） 防止任务重复提交
         String lockKey = RedisKeyConstants.AI_TASK_LOCK_PREFIX + userId + ":" + draftId + ":" + taskTypeCode;
         RLock lock = redissonClient.getLock(lockKey);
         try {
             if (!lock.tryLock(0, 5, TimeUnit.SECONDS)) {
                 throw new AppException(ResponseCode.E0001.getCode(), "请勿重复提交，上个任务仍在处理中");
             }
-            DraftEntity draft = draftDomainService.queryDraftDetail(draftId, userId);
-            draft.checkEditable();
-            AiWritingTaskTypeVO taskType = AiWritingTaskTypeVO.fromCode(taskTypeCode);
-            String prompt = buildPrompt(draft, taskType, promptParams);
-            AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, prompt, enableIllustration);
-            aiTaskRepository.save(task);
-            Long taskId = task.getTaskId();
+            // 3. 事务内：校验 + 建任务 + 写 Outbox（通过 self 代理调用，确保 @Transactional 生效）
+            AiTaskEntity task = self.doSubmitInTransaction(userId, draftId, taskTypeCode, promptParams, enableIllustration);
 
-            // 先以占位 payload 保存 Outbox 拿到真实 eventId，再用真实 eventId 更新 payload
-            OutboxEventEntity outboxEvent = OutboxEventEntity.newEvent(taskId, EVENT_TYPE_CREATED, mqTopic, "{}");
-            outboxEventRepository.save(outboxEvent);
-            AiTaskMessage message = AiTaskMessage.builder()
-                    .taskId(taskId).eventId(outboxEvent.getEventId()).createdAt(java.time.LocalDateTime.now().toString()).build();
-            outboxEventRepository.updatePayload(outboxEvent.getEventId(), JSON.toJSONString(message));
+            // 4. 事务外：立即尝试投递 MQ（失败不影响主流程，由定时任务兜底）
+            outboxImmediatePublisher.tryPublish(task.getTaskId());
 
-            log.info("任务提交 taskId={} eventId={}", taskId, outboxEvent.getEventId());
             return task;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new AppException(ResponseCode.E0001.getCode(), "系统繁忙，请稍后再试");
         } finally {
+            // 锁释放
             if (lock.isHeldByCurrentThread()) lock.unlock();
         }
+    }
+
+    /**
+     * 事务内：校验草稿 + 创建任务 + 写 Outbox 事件
+     * <p>保证 ai_task 和 outbox_event 在同一事务中写入，原子一致。</p>
+     */
+    @Transactional
+    public AiTaskEntity doSubmitInTransaction(Long userId, Long draftId, String taskTypeCode,
+                                              Map<String, Object> promptParams, Boolean enableIllustration) {
+        // 获取草稿信息，检测状态当前是否为编辑中
+        DraftEntity draft = draftDomainService.queryDraftDetail(draftId, userId);
+        draft.checkEditable();
+        // 解析任务类型
+        AiWritingTaskTypeVO taskType = AiWritingTaskTypeVO.fromCode(taskTypeCode);
+        // 根据不同的任务类型，拼接出不同的提示词（会提取记忆系统）
+        String prompt = buildPrompt(draft, taskType, promptParams);
+        // 初始化任务并落库，状态为待处理
+        AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, prompt, enableIllustration);
+        aiTaskRepository.save(task);
+        Long taskId = task.getTaskId();
+
+        // 创建 outbox 事件
+        // 先以占位 payload 保存 Outbox 拿到真实 eventId，再用真实 eventId 更新 payload
+        OutboxEventEntity outboxEvent = OutboxEventEntity.newEvent(taskId, EVENT_TYPE_CREATED, mqTopic, "{}");
+        outboxEventRepository.save(outboxEvent);
+        AiTaskMessage message = AiTaskMessage.builder()
+                .taskId(taskId).eventId(outboxEvent.getEventId()).createdAt(java.time.LocalDateTime.now().toString()).build();
+        outboxEventRepository.updatePayload(outboxEvent.getEventId(), JSON.toJSONString(message));
+
+        log.info("任务提交 taskId={} eventId={}", taskId, outboxEvent.getEventId());
+        return task;
     }
 
     @Override
@@ -241,9 +277,11 @@ public class AiWritingService implements IAiWritingService {
             taskEventPublisher.publish(taskId, resultEvent(formattedContent));
             taskEventPublisher.publishDone(taskId);
 
-            // 异步触发记忆抽取
-            String sessionId = chatService.createSession(WRITING_AGENT_ID, String.valueOf(task.getUserId()));
-            memoryManager.addAsync(task.getUserId(), Long.parseLong(WRITING_AGENT_ID), sessionId,
+            // 异步触发记忆抽取，使用策略中指定的实际 agentId
+            AiWritingTaskStrategy strategy = strategyResolver.resolve(task);
+            String memAgentId = strategy.agentId();
+            String sessionId = chatService.createSession(memAgentId, String.valueOf(task.getUserId()));
+            memoryManager.addAsync(task.getUserId(), Long.parseLong(memAgentId), sessionId,
                     List.of(Map.of("role", "user", "content", task.getPromptPayload()),
                             Map.of("role", "assistant", "content", formattedContent)));
 

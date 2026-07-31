@@ -85,4 +85,11 @@ public interface IOutboxEventDao {
     @Select("SELECT COUNT(1) FROM outbox_event "
             + "WHERE status IN (" + OutboxEventVO.PUBLISHABLE_STATUSES + ")")
     int countPublishableEvents();
+
+    @Select("SELECT event_id, event_type, aggregate_id, topic, payload, status, retry_count, "
+            + "next_retry_at, published_at, last_error, publisher_id, create_time, update_time "
+            + "FROM outbox_event "
+            + "WHERE aggregate_id = #{aggregateId} "
+            + "ORDER BY create_time DESC LIMIT 1")
+    OutboxEventPO findLatestByAggregateId(@Param("aggregateId") Long aggregateId);
 }
