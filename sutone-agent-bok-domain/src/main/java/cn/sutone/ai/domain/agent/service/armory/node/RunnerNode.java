@@ -49,7 +49,7 @@ public class RunnerNode extends AbstractArmorySupport {
                 .runner(runner)
                 .build();
 
-        // 注册到 Spring 容器
+        // 注册 最终的agent应用到 Spring 容器，其中最核心的内容是 runner
         registerBean(agentId, AiAgentRegisterVO.class, aiAgentRegisterVO);
 
         return aiAgentRegisterVO;
@@ -57,13 +57,13 @@ public class RunnerNode extends AbstractArmorySupport {
 
     private InMemoryRunner getRunner(DefaultArmoryFactory.DynamicContext dynamicContext, AiAgentConfigTableVO aiAgentConfigTableVO, String appName) {
         AiAgentConfigTableVO.Module.Runner runnerConfig = aiAgentConfigTableVO.getModule().getRunner();
-
+        // 获取到 runner 最终选择到的 workflow
         String agentName = runnerConfig.getAgentName();
         if (StringUtils.isBlank(agentName)) {
             log.error("runner.agentName is null");
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(), ResponseCode.ILLEGAL_PARAMETER.getInfo());
         }
-
+        // 获取对应的 agent
         BaseAgent baseAgent = dynamicContext.getAgentGroup().get(agentName);
 
         List<BasePlugin> plugins;
@@ -71,13 +71,14 @@ public class RunnerNode extends AbstractArmorySupport {
         if (null != pluginNameList && !pluginNameList.isEmpty()) {
             plugins = new ArrayList<>();
             for (String pluginName : pluginNameList) {
+                // 插件是由 组件扫描(component-scan) 自动装配的
                 BasePlugin plugin = getBean(pluginName);
                 plugins.add(plugin);
             }
         } else {
             plugins = ImmutableList.of();
         }
-
+        // 装配应用的Runner
         return new InMemoryRunner(baseAgent, appName, plugins);
     }
 

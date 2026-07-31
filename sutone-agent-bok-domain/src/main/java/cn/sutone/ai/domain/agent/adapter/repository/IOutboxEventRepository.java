@@ -41,4 +41,9 @@ public interface IOutboxEventRepository {
      * 待投递事件数量（用于监控指标）
      */
     int countPublishableEvents();
+
+    /**
+     * 查询指定 aggregateId 的最新一条事件（用于即时投递）
+     */
+    OutboxEventEntity findLatestByAggregateId(Long aggregateId);
 }
