@@ -84,6 +84,7 @@ public class AiWritingService implements IAiWritingService {
     private final ITaskEventPublisher taskEventPublisher;
     private final AiWritingTaskStrategyResolver strategyResolver;
     private final cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher;
+    private final cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService;
 
     public AiWritingService(IChatService chatService, IAiTaskRepository aiTaskRepository,
                             IOutboxEventRepository outboxEventRepository,
@@ -91,7 +92,8 @@ public class AiWritingService implements IAiWritingService {
                             RedissonClient redissonClient, MemoryManager memoryManager,
                             AgentWritingRunner agentWritingRunner, ITaskEventPublisher taskEventPublisher,
                             AiWritingTaskStrategyResolver strategyResolver,
-                            cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher) {
+                            cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher,
+                            cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService) {
         this.chatService = chatService;
         this.aiTaskRepository = aiTaskRepository;
         this.outboxEventRepository = outboxEventRepository;
@@ -103,6 +105,7 @@ public class AiWritingService implements IAiWritingService {
         this.taskEventPublisher = taskEventPublisher;
         this.strategyResolver = strategyResolver;
         this.outboxImmediatePublisher = outboxImmediatePublisher;
+        this.userModelConfigService = userModelConfigService;
     }
 
     @Override
@@ -148,8 +151,11 @@ public class AiWritingService implements IAiWritingService {
         AiWritingTaskTypeVO taskType = AiWritingTaskTypeVO.fromCode(taskTypeCode);
         // 根据不同的任务类型，拼接出不同的提示词（会提取记忆系统）
         String prompt = buildPrompt(draft, taskType, promptParams);
-        // 初始化任务并落库，状态为待处理
-        AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, prompt, enableIllustration);
+        // 初始化任务并落库，状态为待处理；快照用户默认模型配置 ID（多租户）
+        java.util.Optional<cn.sutone.ai.domain.agent.model.entity.UserModelConfigEntity> defaultCfg =
+                userModelConfigService.queryDefaultByUserId(userId);
+        Long modelConfigId = defaultCfg.map(cn.sutone.ai.domain.agent.model.entity.UserModelConfigEntity::getId).orElse(null);
+        AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, prompt, enableIllustration, modelConfigId);
         aiTaskRepository.save(task);
         Long taskId = task.getTaskId();
 

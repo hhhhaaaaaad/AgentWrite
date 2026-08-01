@@ -33,11 +33,14 @@ class AgentWritingRunnerTest {
     @Mock
     private IChatService chatService;
 
+    @Mock
+    private cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService;
+
     private AgentWritingRunner runner;
 
     @BeforeEach
     void setUp() {
-        runner = new AgentWritingRunner(chatService, new AiWritingTaskStrategyResolver());
+        runner = new AgentWritingRunner(chatService, new AiWritingTaskStrategyResolver(), userModelConfigService);
         lenient().when(chatService.createSession(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq(false)))
                 .thenReturn("session-wf");
         lenient().when(chatService.createSession(eq(SINGLE_AGENT_ID), eq(String.valueOf(USER_ID)), eq(false)))

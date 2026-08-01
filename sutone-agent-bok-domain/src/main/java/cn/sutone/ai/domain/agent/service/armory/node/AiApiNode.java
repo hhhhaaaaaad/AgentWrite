@@ -3,6 +3,7 @@ package cn.sutone.ai.domain.agent.service.armory.node;
 import cn.sutone.ai.domain.agent.model.entity.ArmoryCommandEntity;
 import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiAgentRegisterVO;
+import cn.sutone.ai.domain.agent.model.valobj.UserModelConfigVO;
 import cn.sutone.ai.domain.agent.service.armory.AbstractArmorySupport;
 import cn.sutone.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
 import cn.sutone.ai.domain.agent.service.armory.matter.patch.CustomApiInterceptor;
@@ -17,6 +18,11 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import javax.annotation.Resource;
 
+/**
+ * AI API 节点：构建 OpenAiApi 客户端
+ * <p>多租户场景下，优先使用用户自定义配置（baseUrl/apiKey），
+ * 降级到系统默认配置。</p>
+ */
 @Slf4j
 @Service
 public class AiApiNode extends AbstractArmorySupport {
@@ -31,11 +37,20 @@ public class AiApiNode extends AbstractArmorySupport {
         AiAgentConfigTableVO aiAgentConfigTableVO = requestParameter.getAiAgentConfigTableVO();
         AiAgentConfigTableVO.Module.AiApi aiApiConfig = aiAgentConfigTableVO.getModule().getAiApi();
 
+        // 多租户：优先使用用户自定义模型配置，降级到系统默认
+        UserModelConfigVO userCfg = requestParameter.getUserModelConfig();
+        String baseUrl = (userCfg != null) ? userCfg.baseUrl() : aiApiConfig.getBaseUrl();
+        String apiKey  = (userCfg != null) ? userCfg.apiKeyPlain() : aiApiConfig.getApiKey();
+        String completionsPath = (userCfg != null)
+                ? userCfg.completionsPath()
+                : (StringUtils.isNotBlank(aiApiConfig.getCompletionsPath()) ? aiApiConfig.getCompletionsPath() : "v1/chat/completions");
+        String embeddingsPath = StringUtils.isNotBlank(aiApiConfig.getEmbeddingsPath()) ? aiApiConfig.getEmbeddingsPath() : "v1/embeddings";
+
         OpenAiApi openAiApi = OpenAiApi.builder()
-                .baseUrl(aiApiConfig.getBaseUrl())
-                .apiKey(aiApiConfig.getApiKey())
-                .completionsPath(StringUtils.isNotBlank(aiApiConfig.getCompletionsPath()) ? aiApiConfig.getCompletionsPath() : "v1/chat/completions")
-                .embeddingsPath(StringUtils.isNotBlank(aiApiConfig.getEmbeddingsPath()) ? aiApiConfig.getEmbeddingsPath() : "v1/embeddings")
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .completionsPath(completionsPath)
+                .embeddingsPath(embeddingsPath)
                 .restClientBuilder(RestClient.builder().requestInterceptor(new CustomApiInterceptor()))
                 .webClientBuilder(WebClient.builder().filter(new CustomApiWebClientFilter()))
                 .build();

@@ -7,6 +7,7 @@ import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownBlockRender
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
 import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
 import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
+import cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.adk.events.Event;
@@ -51,10 +52,13 @@ public class AgentWritingRunner {
 
     private final IChatService chatService;
     private final AiWritingTaskStrategyResolver strategyResolver;
+    private final UserModelConfigService userModelConfigService;
 
-    public AgentWritingRunner(IChatService chatService, AiWritingTaskStrategyResolver strategyResolver) {
+    public AgentWritingRunner(IChatService chatService, AiWritingTaskStrategyResolver strategyResolver,
+                              UserModelConfigService userModelConfigService) {
         this.chatService = chatService;
         this.strategyResolver = strategyResolver;
+        this.userModelConfigService = userModelConfigService;
     }
 
     /**

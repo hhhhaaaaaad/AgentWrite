@@ -49,7 +49,11 @@ public class OutboxImmediatePublisher implements IOutboxImmediatePublisher {
             }
 
             Object payloadObj = JSON.parse(event.getPayload());
+            // mq 如果发送不成功，不会抛异常，所以发送失败会直接跳过，等待定时兜底
+            // mq 发送失败，直接跳到 catch 中
             SendResult result = rocketMQTemplate.syncSend(event.getTopic(), payloadObj, sendTimeout);
+            // ！会出现一种极端情况：mq发成功了，但是由于 网络抖动/DB 宕机 导致 数据库 没更新成功，
+            // 没关系：会有定时任务兜底，虽然消息重复投递，但是Consumer 做了幂等兜底
             outboxEventRepository.markPublished(event.getEventId());
             log.info("即时投递成功 taskId={} eventId={} msgId={}", taskId, event.getEventId(), result.getMsgId());
         } catch (Exception e) {

@@ -32,7 +32,12 @@ public class OutboxEventRepository implements IOutboxEventRepository {
     @Override
     public List<OutboxEventEntity> claimPublishable(int limit) {
         // UPDATE 原子抢占行锁保证多实例安全，无需 @Transactional（两条 SQL 间无需原子回滚）
+        // 这样实现的原因，本质是为了解决消息重复发送的问题！
+        // 原来尝试使用 @Transactional，但是发现即使在同一个实例快速连续发送大量消息时，
+        // 也会出现消息重复发送的问题。原因是在高并发下，多个线程几乎同时调用 publishPendingEvents，
+        // 导致多条消息被抢占，从而引发重复发送。
         String publisherId = UUID.randomUUID().toString();
+        // 将可发布的任务（恢复的和新建的任务）状态批量设置为 SENDING
         dao.claimPublishableBatch(publisherId, limit);
 
         // Step 2: 根据 publisher_id 回查已抢占的事件

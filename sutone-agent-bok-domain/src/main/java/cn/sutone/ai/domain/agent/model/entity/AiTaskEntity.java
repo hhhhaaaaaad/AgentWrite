@@ -23,6 +23,8 @@ public class AiTaskEntity {
     private Long taskId;
     private Long userId;
     private Long draftId;
+    /** 用户自定义模型配置 ID，NULL 表示使用系统默认 */
+    private Long modelConfigId;
     private AiWritingTaskTypeVO taskType;
     private String promptPayload;
     private Boolean enableIllustration;
@@ -62,6 +64,13 @@ public class AiTaskEntity {
                 .createTime(now)
                 .updateTime(now)
                 .build();
+    }
+
+    /** 创建 PENDING 任务时快照用户的默认模型配置 ID（多租户） */
+    public static AiTaskEntity initPending(Long userId, Long draftId, AiWritingTaskTypeVO taskType, String promptPayload, Boolean enableIllustration, Long modelConfigId) {
+        AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, promptPayload, enableIllustration);
+        task.setModelConfigId(modelConfigId);
+        return task;
     }
 
     public void startRunning() {
