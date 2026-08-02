@@ -50,7 +50,7 @@ public class AiTaskRecoveryExecutor {
             log.info("任务已有未投递 Outbox 事件，跳过创建 taskId={}", task.getTaskId());
             return;
         }
-
+        // 标记为重试中，并创建 Outbox 事件
         aiTaskRepository.markRetryingImmediate(task.getTaskId(), "Worker 心跳超时");
         OutboxEventEntity retryEvent = OutboxEventEntity.newEvent(
                 task.getTaskId(), "AI_WRITING_TASK_CREATED",

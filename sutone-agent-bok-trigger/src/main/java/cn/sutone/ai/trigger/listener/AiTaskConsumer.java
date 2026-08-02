@@ -56,6 +56,7 @@ public class AiTaskConsumer implements RocketMQListener<AiTaskMessage> {
         // Step 1: CAS 原子抢占（UPDATE ... WHERE status='PENDING'）
         // 多实例部署时，同一条消息可能被多个 Consumer 收到，只有一个能 claim 成功
         // workId 标记谁在进行工作，还有方便后续的故障恢复
+        // 将状态设置为 running 进行抢占
         int affectedRows = aiTaskRepository.claimTask(taskId, getWorkerId());
         if (affectedRows == 0) {
             // 已被其他实例抢占，或任务状态已不是 PENDING（重复消息），直接跳过

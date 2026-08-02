@@ -2,6 +2,7 @@ package cn.sutone.ai.domain.agent.service;
 
 import cn.sutone.ai.domain.agent.model.entity.ChatCommandEntity;
 import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
+import cn.sutone.ai.domain.agent.model.valobj.UserModelConfigVO;
 import com.google.adk.events.Event;
 import io.reactivex.rxjava3.core.Flowable;
 
@@ -31,6 +32,14 @@ public interface IChatService {
     List<String> handleMessage(String agentId, String userId, String sessionId, String message);
 
     Flowable<Event> handleMessageStream(String agentId, String userId, String sessionId, String message);
+
+    /**
+     * 使用指定模型配置执行流式对话（多租户场景）
+     * <p>当 userConfig 不为 null 时，动态构建 Runner 使用用户自定义的 API Key 和模型；
+     * 为 null 时降级到全局单例 Runner。</p>
+     */
+    Flowable<Event> handleMessageStreamWithConfig(String agentId, String userId, String sessionId,
+                                                   String message, UserModelConfigVO userConfig);
 
     List<String> handleMessage(ChatCommandEntity chatCommandEntity);
 

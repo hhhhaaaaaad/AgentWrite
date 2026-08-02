@@ -31,6 +31,7 @@ public class AiTaskRecoveryJob {
 
     @Scheduled(fixedDelay = 30_000)
     public void recoverStaleTasks() {
+        // 查找心跳超时的任务
         LocalDateTime timeout = LocalDateTime.now().minusMinutes(timeoutMinutes);
         List<AiTaskEntity> staleTasks = aiTaskRepository.findStaleRunning(timeout, 50);
         log.info("补偿扫描: 发现 {} 个心跳超时 RUNNING 任务 (超时阈值 {} 分钟)", staleTasks.size(), timeoutMinutes);
