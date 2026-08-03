@@ -70,11 +70,16 @@ public class ChatModelNode extends AbstractArmorySupport {
             }
         }
 
-        // 构建对话模型
+        // 构建对话模型（多租户：若用户指定了 modelName 则覆盖系统默认）
+        String modelName = chatModelConfig.getModel();
+        if (requestParameter.getUserModelConfig() != null
+                && requestParameter.getUserModelConfig().modelName() != null) {
+            modelName = requestParameter.getUserModelConfig().modelName();
+        }
         ChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(openAiApi)
                 .defaultOptions(OpenAiChatOptions.builder()
-                        .model(chatModelConfig.getModel())
+                        .model(modelName)
                         .maxTokens(16384)
                         .toolCallbacks(toolCallbackList)
                         .build())

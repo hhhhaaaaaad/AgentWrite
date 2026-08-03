@@ -84,6 +84,7 @@ public class AiWritingService implements IAiWritingService {
     private final ITaskEventPublisher taskEventPublisher;
     private final AiWritingTaskStrategyResolver strategyResolver;
     private final cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher;
+    private final cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService;
 
     public AiWritingService(IChatService chatService, IAiTaskRepository aiTaskRepository,
                             IOutboxEventRepository outboxEventRepository,
@@ -91,7 +92,8 @@ public class AiWritingService implements IAiWritingService {
                             RedissonClient redissonClient, MemoryManager memoryManager,
                             AgentWritingRunner agentWritingRunner, ITaskEventPublisher taskEventPublisher,
                             AiWritingTaskStrategyResolver strategyResolver,
-                            cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher) {
+                            cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher,
+                            cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService) {
         this.chatService = chatService;
         this.aiTaskRepository = aiTaskRepository;
         this.outboxEventRepository = outboxEventRepository;
@@ -103,6 +105,7 @@ public class AiWritingService implements IAiWritingService {
         this.taskEventPublisher = taskEventPublisher;
         this.strategyResolver = strategyResolver;
         this.outboxImmediatePublisher = outboxImmediatePublisher;
+        this.userModelConfigService = userModelConfigService;
     }
 
     @Override
@@ -148,8 +151,11 @@ public class AiWritingService implements IAiWritingService {
         AiWritingTaskTypeVO taskType = AiWritingTaskTypeVO.fromCode(taskTypeCode);
         // 根据不同的任务类型，拼接出不同的提示词（会提取记忆系统）
         String prompt = buildPrompt(draft, taskType, promptParams);
-        // 初始化任务并落库，状态为待处理
-        AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, prompt, enableIllustration);
+        // 初始化任务并落库，状态为待处理；快照用户默认模型配置 ID（多租户）
+        java.util.Optional<cn.sutone.ai.domain.agent.model.entity.UserModelConfigEntity> defaultCfg =
+                userModelConfigService.queryDefaultByUserId(userId);
+        Long modelConfigId = defaultCfg.map(cn.sutone.ai.domain.agent.model.entity.UserModelConfigEntity::getId).orElse(null);
+        AiTaskEntity task = AiTaskEntity.initPending(userId, draftId, taskType, prompt, enableIllustration, modelConfigId);
         aiTaskRepository.save(task);
         Long taskId = task.getTaskId();
 
@@ -248,38 +254,61 @@ public class AiWritingService implements IAiWritingService {
 
     /**
      * MQ Consumer 入口：执行 Agent 编排，不依赖 HTTP/Servlet
+     *
+     * <p>执行流程：
+     * 1. 查询任务详情（prompt、userId、draftId 等）
+     * 2. 调用 AgentWritingRunner 执行 Multi-Agent 编排（analyst→generator→reviewer→配图）
+     * 3. 执行过程中通过 eventConsumer 回调：
+     *    - 每 5 秒更新一次心跳（供 RecoveryJob 判断任务是否存活）
+     *    - 实时推送流式事件到 Redis Stream（前端 SSE 消费）
+     * 4. 成功：结果落库 + 推送终稿事件 + 异步触发记忆抽取
+     * 5. 可重试异常（模型限流/网络超时）：标记 RETRYING + 抛出让 MQ 自动重试
+     * 6. 不可恢复异常：标记 FAILED + 推送错误事件给前端
+     * </p>
      */
     @Override
     public void executeTask(Long taskId) {
+        // Step 1: 查询任务（Consumer 的 claimTask 已将状态原子更新为 RUNNING）
         AiTaskEntity task = aiTaskRepository.queryById(taskId);
         if (null == task) {
             log.error("executeTask: 任务不存在 taskId={}", taskId);
             return;
         }
-        // 抢占已由 Consumer 的 claimTask 原子完成，此处不再重复更新状态
 
-        // 心跳节流：最多每 5 秒写一次 DB，避免每个 token 都触发写操作
+        // Step 2: 心跳节流设置
+        // AI 任务执行 30s~2min，期间每产出一个 token 都会回调 eventConsumer，
+        // 但心跳只需每 5 秒写一次 DB，避免 QPS 过高打爆数据库
         final long heartbeatIntervalMs = 5_000L;
         final long[] lastHeartbeat = {System.currentTimeMillis()};
 
         try {
+            // Step 3: 执行 Agent 编排（核心调用）
+            // agentWritingRunner.run() 内部会根据任务类型选择 workflow（多 Agent）或 single-agent 路径
+            // eventConsumer 回调在每个 token/status 事件产出时触发
             String formattedContent = agentWritingRunner.run(task, event -> {
+                // 心跳节流：距上次 ≥ 5s 才更新 DB
                 long now = System.currentTimeMillis();
                 if (now - lastHeartbeat[0] >= heartbeatIntervalMs) {
                     aiTaskRepository.touchHeartbeat(taskId);
                     lastHeartbeat[0] = now;
                 }
+                // 实时推送事件到 Redis Stream，前端 SSE 连接监听并渲染
                 taskEventPublisher.publish(taskId, event);
             });
 
+            // Step 4: 成功路径
+            // 4a. 结果落库（status=SUCCESS, response_content=终稿）
             aiTaskRepository.markSuccess(taskId, formattedContent);
-            // 补发权威终稿事件：前端据此采纳最终内容，避免拼接 generator/reviewer 多阶段 token 造成重复
+            // 4b. 补发权威终稿事件：前端据此采纳最终内容，
+            //     避免拼接 generator/reviewer 多阶段 token 造成重复
+            //     推送前端 发送给redis 的 stream，
             taskEventPublisher.publish(taskId, resultEvent(formattedContent));
             taskEventPublisher.publishDone(taskId);
 
-            // 异步触发记忆抽取，使用策略中指定的实际 agentId
+            // 4c. 异步触发记忆抽取：从本次对话中提取用户技术背景、写作偏好等
             AiWritingTaskStrategy strategy = strategyResolver.resolve(task);
             String memAgentId = strategy.agentId();
+            // 此处的 sessionId 不是之前的对话id，而是给记忆抽取的 LLM 调用提供一个运行环境。
             String sessionId = chatService.createSession(memAgentId, String.valueOf(task.getUserId()));
             memoryManager.addAsync(task.getUserId(), Long.parseLong(memAgentId), sessionId,
                     List.of(Map.of("role", "user", "content", task.getPromptPayload()),
@@ -287,10 +316,14 @@ public class AiWritingService implements IAiWritingService {
 
             log.info("executeTask 完成 taskId={}", taskId);
         } catch (RetryableAgentException e) {
+            // Step 5: 可重试异常（模型限流、网络超时等临时性错误）
+            // 标记 RETRYING + 抛出异常 → Consumer 不 ACK → RocketMQ 自动重试（最多 3 次）
             log.error("executeTask 可重试异常 taskId={}: {}", taskId, e.getMessage());
             aiTaskRepository.markRetryingImmediate(taskId, safeMsg(e));
             throw e;
         } catch (Exception e) {
+            // Step 6: 不可恢复异常（配置错误、Prompt 格式问题等永久性错误）
+            // 标记 FAILED + 推送 error 事件给前端 + 不抛异常（正常 ACK，不触发 MQ 重试）
             log.error("executeTask 不可恢复错误 taskId={}: {}", taskId, e.getMessage(), e);
             aiTaskRepository.markFailed(taskId, safeMsg(e));
             taskEventPublisher.publishError(taskId, safeMsg(e));

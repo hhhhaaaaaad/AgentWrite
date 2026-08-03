@@ -33,11 +33,14 @@ class AgentWritingRunnerTest {
     @Mock
     private IChatService chatService;
 
+    @Mock
+    private cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService;
+
     private AgentWritingRunner runner;
 
     @BeforeEach
     void setUp() {
-        runner = new AgentWritingRunner(chatService, new AiWritingTaskStrategyResolver());
+        runner = new AgentWritingRunner(chatService, new AiWritingTaskStrategyResolver(), userModelConfigService);
         lenient().when(chatService.createSession(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq(false)))
                 .thenReturn("session-wf");
         lenient().when(chatService.createSession(eq(SINGLE_AGENT_ID), eq(String.valueOf(USER_ID)), eq(false)))
@@ -52,14 +55,14 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_single")
                 .content(Content.fromParts(Part.fromText("本文介绍 RocketMQ 的可靠投递机制。")))
                 .build();
-        when(chatService.handleMessageStream(eq(SINGLE_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-single"), anyString()))
+        when(chatService.handleMessageStreamWithConfig(eq(SINGLE_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-single"), anyString(), any()))
                 .thenReturn(Flowable.just(singleAgentEvent));
 
         String result = runner.run(task, event -> {});
 
         assertEquals("本文介绍 RocketMQ 的可靠投递机制。", result);
         // 验证未调用 workflow agent 和配图 agent
-        verify(chatService, never()).handleMessageStream(eq(WORKFLOW_AGENT_ID), anyString(), anyString(), anyString());
+        verify(chatService, never()).handleMessageStreamWithConfig(eq(WORKFLOW_AGENT_ID), anyString(), anyString(), anyString(), any());
         verify(chatService, never()).handleMessage(eq("300003"), anyString(), anyString(), anyString());
     }
 
@@ -75,7 +78,7 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_reviewer")
                 .content(Content.fromParts(Part.fromText("reviewer 终稿")))
                 .build();
-        when(chatService.handleMessageStream(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString()))
+        when(chatService.handleMessageStreamWithConfig(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString(), any()))
                 .thenReturn(Flowable.just(generatorEvent, reviewerEvent));
 
         String result = runner.run(task, event -> {});
@@ -95,7 +98,7 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_reviewer")
                 .content(Content.fromParts(Part.fromText(blocks)))
                 .build();
-        when(chatService.handleMessageStream(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString()))
+        when(chatService.handleMessageStreamWithConfig(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString(), any()))
                 .thenReturn(Flowable.just(reviewerEvent));
 
         String result = runner.run(task, event -> {});
@@ -118,7 +121,7 @@ class AgentWritingRunnerTest {
                 .author("agent_writing_reviewer")
                 .content(Content.fromParts(Part.fromText(blocks)))
                 .build();
-        when(chatService.handleMessageStream(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString()))
+        when(chatService.handleMessageStreamWithConfig(eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString(), any()))
                 .thenReturn(Flowable.just(reviewerEvent));
 
         String result = runner.run(task, event -> {});

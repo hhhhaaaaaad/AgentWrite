@@ -2,11 +2,13 @@ package cn.sutone.ai.domain.agent.service.ai_writing;
 
 import cn.sutone.ai.domain.agent.model.entity.AiTaskEntity;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingStreamEventVO;
+import cn.sutone.ai.domain.agent.model.valobj.UserModelConfigVO;
 import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownBlockRenderer;
 import cn.sutone.ai.domain.agent.service.ai_writing.markdown.MarkdownNormalizer;
 import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategy;
 import cn.sutone.ai.domain.agent.service.ai_writing.strategy.AiWritingTaskStrategyResolver;
+import cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.adk.events.Event;
@@ -51,10 +53,13 @@ public class AgentWritingRunner {
 
     private final IChatService chatService;
     private final AiWritingTaskStrategyResolver strategyResolver;
+    private final UserModelConfigService userModelConfigService;
 
-    public AgentWritingRunner(IChatService chatService, AiWritingTaskStrategyResolver strategyResolver) {
+    public AgentWritingRunner(IChatService chatService, AiWritingTaskStrategyResolver strategyResolver,
+                              UserModelConfigService userModelConfigService) {
         this.chatService = chatService;
         this.strategyResolver = strategyResolver;
+        this.userModelConfigService = userModelConfigService;
     }
 
     /**
@@ -68,12 +73,16 @@ public class AgentWritingRunner {
         String agentId = strategy.agentId();
         String userId = String.valueOf(task.getUserId());
         // 快捷操作为一次性任务，使用无历史会话，避免历史正文污染上下文导致模型返回对话式回复
+        // 每次创建新的session
         String sessionId = chatService.createSession(agentId, userId, false);
 
+        // 多租户：解析用户模型配置（如果 task 中有 modelConfigId 则解密查出配置）
+        UserModelConfigVO userCfg = userModelConfigService.resolveForTask(task).orElse(null);
+        // 简单任务 不走 workflow
         if (strategy.useWorkflow()) {
-            return runWorkflow(agentId, userId, sessionId, task, strategy, eventConsumer);
+            return runWorkflow(agentId, userId, sessionId, task, strategy, eventConsumer, userCfg);
         } else {
-            return runSingleAgent(agentId, userId, sessionId, task, strategy, eventConsumer);
+            return runSingleAgent(agentId, userId, sessionId, task, strategy, eventConsumer, userCfg);
         }
     }
 
@@ -82,12 +91,12 @@ public class AgentWritingRunner {
      */
     private String runWorkflow(String agentId, String userId, String sessionId,
                                AiTaskEntity task, AiWritingTaskStrategy strategy,
-                               Consumer<AiWritingStreamEventVO> eventConsumer) {
+                               Consumer<AiWritingStreamEventVO> eventConsumer, UserModelConfigVO userCfg) {
         StringBuilder responseBuilder = new StringBuilder();
         StringBuilder reviewerLineBuffer = new StringBuilder();
         boolean enableIllustration = strategy.enableIllustration();
 
-        Flowable<Event> events = chatService.handleMessageStream(agentId, userId, sessionId, task.getPromptPayload());
+        Flowable<Event> events = chatService.handleMessageStreamWithConfig(agentId, userId, sessionId, task.getPromptPayload(), userCfg);
         String[] currentPhase = {null};
         events.blockingForEach(event -> {
             if (!event.functionCalls().isEmpty() || !event.functionResponses().isEmpty()) return;
@@ -138,16 +147,19 @@ public class AgentWritingRunner {
      */
     private String runSingleAgent(String agentId, String userId, String sessionId,
                                   AiTaskEntity task, AiWritingTaskStrategy strategy,
-                                  Consumer<AiWritingStreamEventVO> eventConsumer) {
+                                  Consumer<AiWritingStreamEventVO> eventConsumer, UserModelConfigVO userCfg) {
         StringBuilder responseBuilder = new StringBuilder();
+        // 推一条状态事件给前端，前端显示进度提示"正在生成内容..."
         eventConsumer.accept(statusEvent("generating", "正在生成内容..."));
 
-        Flowable<Event> events = chatService.handleMessageStream(agentId, userId, sessionId, task.getPromptPayload());
+        Flowable<Event> events = chatService.handleMessageStreamWithConfig(agentId, userId, sessionId, task.getPromptPayload(), userCfg);
+        // 收集输出流，逐块拼接至 responseBuilder
         events.blockingForEach(event -> {
             if (!event.functionCalls().isEmpty() || !event.functionResponses().isEmpty()) return;
             String content = event.stringifyContent();
             if (null == content || content.isBlank()) return;
             responseBuilder.append(content);
+            // 传给 Redis Stream，之后推送给前端
             eventConsumer.accept(tokenEvent("generating", content));
         });
 

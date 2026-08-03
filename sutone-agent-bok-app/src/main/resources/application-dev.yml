@@ -67,6 +67,11 @@ memory:
     model: ${MEMORY_EMBEDDING_MODEL:BAAI/bge-large-zh-v1.5}
     embeddings-path: ${MEMORY_EMBEDDING_PATH:/v1/embeddings}
 
+# API Key 加密密钥（多租户，生产环境必须用环境变量覆盖）
+crypto:
+  api-key:
+    secret: ${CRYPTO_API_KEY_SECRET:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff}
+
 # 日志
 logging:
   level:

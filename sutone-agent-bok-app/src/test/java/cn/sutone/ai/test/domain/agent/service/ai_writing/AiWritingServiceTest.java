@@ -86,6 +86,9 @@ class AiWritingServiceTest {
     private cn.sutone.ai.domain.agent.adapter.repository.IOutboxImmediatePublisher outboxImmediatePublisher;
 
     @Mock
+    private cn.sutone.ai.domain.agent.service.userconfig.UserModelConfigService userModelConfigService;
+
+    @Mock
     private RLock rLock;
 
     private AiWritingService aiWritingService;
@@ -99,7 +102,8 @@ class AiWritingServiceTest {
     void setUp() throws InterruptedException {
         aiWritingService = new AiWritingService(chatService, aiTaskRepository, outboxEventRepository,
                 draftDomainService, rateLimitService, redissonClient, memoryManager,
-                agentWritingRunner, taskEventPublisher, strategyResolver, outboxImmediatePublisher);
+                agentWritingRunner, taskEventPublisher, strategyResolver, outboxImmediatePublisher,
+                userModelConfigService);
         // 通过反射注入 self 字段（模拟 Spring @Lazy 注入的代理对象）
         try {
             java.lang.reflect.Field selfField = AiWritingService.class.getDeclaredField("self");

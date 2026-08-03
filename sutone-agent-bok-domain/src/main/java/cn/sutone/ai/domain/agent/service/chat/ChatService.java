@@ -1,9 +1,11 @@
 package cn.sutone.ai.domain.agent.service.chat;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IChatMessageRepository;
+import cn.sutone.ai.domain.agent.model.entity.ArmoryCommandEntity;
 import cn.sutone.ai.domain.agent.model.entity.ChatCommandEntity;
 import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiAgentRegisterVO;
+import cn.sutone.ai.domain.agent.model.valobj.UserModelConfigVO;
 import cn.sutone.ai.domain.agent.model.valobj.properties.AiAgentAutoConfigProperties;
 import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
@@ -161,6 +163,7 @@ public class ChatService implements IChatService {
         return outputs;
     }
 
+    // 全局单例的 runner
     @Override
     public Flowable<Event> handleMessageStream(String agentId, String userId, String sessionId, String message) {
         AiAgentRegisterVO aiAgentRegisterVO = defaultArmoryFactory.getAiAgentRegisterVO(agentId);
@@ -173,12 +176,14 @@ public class ChatService implements IChatService {
         persistMessage(userId, sessionId, agentId, "user", message);
 
         InMemoryRunner runner = aiAgentRegisterVO.getRunner();
-
+        // 将消息包装为 Google ADK 的 Content 对象
         Content userMsg = Content.fromParts(Part.fromText(message));
+        // 告诉 ADK 用 SSE 模式接收模型响应（逐 token 推送，不是一次性返回）
         RunConfig runConfig = RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.SSE).build();
 
         // 收集 AI 回复并持久化
         StringBuilder aiResponse = new StringBuilder();
+        // 三个 RxJava 操作符：doOnNext、doOnComplete、doOnError
         return runner.runAsync(userId, sessionId, userMsg, runConfig)
                 .doOnNext(event -> {
                     String content = event.stringifyContent();
@@ -199,6 +204,70 @@ public class ChatService implements IChatService {
                         persistMessage(userId, sessionId, agentId, "assistant", response);
                     }
                 });
+    }
+
+    @Override
+    public Flowable<Event> handleMessageStreamWithConfig(String agentId, String userId, String sessionId,
+                                                          String message, UserModelConfigVO userConfig) {
+        // 无用户配置 → 降级到全局单例 Runner 路径
+        if (userConfig == null) {
+            return handleMessageStream(agentId, userId, sessionId, message);
+        }
+
+        // 多租户：动态装配，使用用户自定义 API Key 和模型
+        log.info("多租户动态装配 agentId={} userId={} configId={}", agentId, userId, userConfig.configId());
+
+        // 查找该 agentId 对应的配置表
+        AiAgentConfigTableVO configTable = aiAgentAutoConfigProperties.getTables().values().stream()
+                .filter(t -> t.getAgent() != null && agentId.equals(t.getAgent().getAgentId()))
+                .findFirst()
+                .orElseThrow(() -> new AppException(ResponseCode.E0001.getCode(), "未找到 agentId=" + agentId + " 的配置"));
+
+        // 走策略树动态装配，注入用户模型配置
+        ArmoryCommandEntity command = ArmoryCommandEntity.builder()
+                .aiAgentConfigTableVO(configTable)
+                .userModelConfig(userConfig)
+                .build();
+
+        try {
+            // 装配用户自己配置好的 api、url
+            AiAgentRegisterVO registerVO = defaultArmoryFactory.armoryStrategyHandler()
+                    .apply(command, new DefaultArmoryFactory.DynamicContext());
+
+            // 后续和系统单例runner一致
+            InMemoryRunner runner = registerVO.getRunner();
+
+            // 持久化用户消息
+            persistMessage(userId, sessionId, agentId, "user", message);
+
+            Content userMsg = Content.fromParts(Part.fromText(message));
+            RunConfig runConfig = RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.SSE).build();
+
+            StringBuilder aiResponse = new StringBuilder();
+            return runner.runAsync(userId, sessionId, userMsg, runConfig)
+                    .doOnNext(event -> {
+                        String content = event.stringifyContent();
+                        if (content != null && !content.isBlank()) {
+                            aiResponse.append(content);
+                        }
+                    })
+                    .doOnComplete(() -> {
+                        String response = aiResponse.toString();
+                        if (!response.isBlank()) {
+                            persistMessage(userId, sessionId, agentId, "assistant", response);
+                        }
+                    })
+                    .doOnError(error -> {
+                        log.error("多租户流式对话异常 sessionId={} agentId={}: {}", sessionId, agentId, error.getMessage(), error);
+                        String response = aiResponse.toString();
+                        if (!response.isBlank()) {
+                            persistMessage(userId, sessionId, agentId, "assistant", response);
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("多租户动态装配失败 agentId={} configId={}: {}", agentId, userConfig.configId(), e.getMessage(), e);
+            throw new AppException(ResponseCode.E0001.getCode(), "动态装配 Agent 失败: " + e.getMessage());
+        }
     }
 
     /** 持久化对话消息，不影响主流程 */

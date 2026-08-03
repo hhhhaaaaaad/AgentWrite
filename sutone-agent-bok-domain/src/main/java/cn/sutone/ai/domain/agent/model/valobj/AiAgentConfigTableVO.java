@@ -151,6 +151,7 @@ public class AiAgentConfigTableVO {
              */
             private String type;
             private String name;
+            // 子智能体列表 在加载 workflow 之前，子 Agent 就已经被加载成功了
             private List<String> subAgents;
             private String description;
             private Integer maxIterations = 3;

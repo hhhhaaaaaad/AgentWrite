@@ -28,3 +28,9 @@ ai-writing:
   recovery:
     running-timeout-minutes: 5
     max-retry-count: 3
+
+# API Key 加密密钥（多租户模型配置）
+# 生产环境必须通过环境变量覆盖，默认值仅用于本地开发
+crypto:
+  api-key:
+    secret: ${CRYPTO_API_KEY_SECRET:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff}
