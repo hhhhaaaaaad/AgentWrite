@@ -234,7 +234,7 @@ public class ChatService implements IChatService {
             AiAgentRegisterVO registerVO = defaultArmoryFactory.armoryStrategyHandler()
                     .apply(command, new DefaultArmoryFactory.DynamicContext());
 
-            // 后续和系统单例runner一致
+            // 后续和系统单例 runner 一致
             InMemoryRunner runner = registerVO.getRunner();
 
             // 持久化用户消息

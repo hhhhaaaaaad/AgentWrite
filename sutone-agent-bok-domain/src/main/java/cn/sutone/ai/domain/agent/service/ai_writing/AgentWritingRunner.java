@@ -45,7 +45,8 @@ public class AgentWritingRunner {
     private static final Map<String, String> PHASE_LABEL_MAP = Map.of(
             "analyzing", "正在分析草稿上下文...",
             "generating", "正在生成写作内容...",
-            "illustrating", "正在识别配图需求...",
+            "illustration_analyzing", "正在识别配图需求...",
+            "illustration_generating", "正在生成配图...",
             "reviewing", "正在进行质量审查..."
     );
 
@@ -80,8 +81,10 @@ public class AgentWritingRunner {
         UserModelConfigVO userCfg = userModelConfigService.resolveForTask(task).orElse(null);
         // 简单任务 不走 workflow
         if (strategy.useWorkflow()) {
+            // 走多agent
             return runWorkflow(agentId, userId, sessionId, task, strategy, eventConsumer, userCfg);
         } else {
+            // 走单agent
             return runSingleAgent(agentId, userId, sessionId, task, strategy, eventConsumer, userCfg);
         }
     }
@@ -102,6 +105,7 @@ public class AgentWritingRunner {
             if (!event.functionCalls().isEmpty() || !event.functionResponses().isEmpty()) return;
             String author = event.author();
             String newPhase = AUTHOR_PHASE_MAP.getOrDefault(author, "thinking");
+            // 阶段切换时推状态事件
             if (!Objects.equals(newPhase, currentPhase[0])) {
                 currentPhase[0] = newPhase;
                 String label = PHASE_LABEL_MAP.getOrDefault(newPhase, "思考中...");
@@ -122,11 +126,16 @@ public class AgentWritingRunner {
         }
 
         // 配图（仅 workflow 模式启用）
-        List<IllustrationRequest> illustrationRequests = enableIllustration
-                ? analyzeIllustrations(task.getUserId(), responseBuilder.toString()) : List.of();
+        List<IllustrationRequest> illustrationRequests = List.of();
+        if (enableIllustration) {
+            eventConsumer.accept(statusEvent("illustration_analyzing", "正在识别配图需求..."));
+            illustrationRequests = analyzeIllustrations(task.getUserId(), responseBuilder.toString());
+        }
         if (!illustrationRequests.isEmpty()) {
-            eventConsumer.accept(statusEvent("illustrating", "正在生成配图..."));
-            for (IllustrationRequest req : illustrationRequests) {
+            for (int i = 0; i < illustrationRequests.size(); i++) {
+                IllustrationRequest req = illustrationRequests.get(i);
+                eventConsumer.accept(statusEvent("illustration_generating",
+                        "正在生成配图 " + (i + 1) + "/" + illustrationRequests.size() + "..."));
                 try {
                     String drawXml = generateIllustration(task.getUserId(), req);
                     if (null != drawXml && !drawXml.isBlank()) {
@@ -265,7 +274,7 @@ public class AgentWritingRunner {
         } else {
             responseBuilder.append("\n").append(diagramBlock);
         }
-        eventConsumer.accept(tokenEvent("illustrating", diagramBlock));
+        eventConsumer.accept(tokenEvent("illustration_generating", diagramBlock));
     }
 
     private int findAnchor(StringBuilder text, String anchor) {
@@ -290,7 +299,9 @@ public class AgentWritingRunner {
      */
     private void renderReviewerBlocks(String raw, StringBuilder responseBuilder,
                                       Consumer<AiWritingStreamEventVO> eventConsumer) {
+        // 按花括号提取顶层 JSON 对象
         List<String> objects = MarkdownBlockRenderer.extractTopLevelObjects(raw);
+        // 回退：未解析出任何块，直接把原文当作 Markdown 落库
         if (objects.isEmpty()) {
             String fallback = raw.strip();
             if (!fallback.isEmpty()) {
@@ -299,10 +310,13 @@ public class AgentWritingRunner {
             }
             return;
         }
+        // 渲染每个 JSON 对象为 Markdown 块
         for (String obj : objects) {
             // 剔除对象内部的真实回车换行（杂散换行），保留代码块里被转义的 \n 序列
             String cleaned = obj.replaceAll("[\\r\\n]", "");
+            // 跳过非 Markdown 块 JSON
             if (!MarkdownBlockRenderer.isBlockLine(cleaned)) continue;
+            // 渲染为 Markdown 块
             String fragment = MarkdownBlockRenderer.renderLine(cleaned);
             if (null == fragment || fragment.isEmpty()) continue;
             responseBuilder.append(fragment).append("\n\n");
