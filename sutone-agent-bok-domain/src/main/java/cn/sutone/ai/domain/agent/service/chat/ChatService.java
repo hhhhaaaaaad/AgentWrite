@@ -209,7 +209,7 @@ public class ChatService implements IChatService {
     @Override
     public Flowable<Event> handleMessageStreamWithConfig(String agentId, String userId, String sessionId,
                                                           String message, UserModelConfigVO userConfig) {
-        // 无用户配置 → 降级到全局单例 Runner 路径
+        // 无用户配置，降级到全局单例 Runner 路径，sessionId 由外部创建，合法
         if (userConfig == null) {
             return handleMessageStream(agentId, userId, sessionId, message);
         }
@@ -230,21 +230,26 @@ public class ChatService implements IChatService {
                 .build();
 
         try {
-            // 装配用户自己配置好的 api、url
             AiAgentRegisterVO registerVO = defaultArmoryFactory.armoryStrategyHandler()
                     .apply(command, new DefaultArmoryFactory.DynamicContext());
 
-            // 后续和系统单例 runner 一致
             InMemoryRunner runner = registerVO.getRunner();
 
-            // 持久化用户消息
-            persistMessage(userId, sessionId, agentId, "user", message);
+            // 动态 Runner 拥有独立的 InMemorySessionService，外部传入的 sessionId 是在默认 Runner
+            // 的 SessionService 中创建的，动态 Runner 无法识别。必须用动态 Runner 自己的
+            // SessionService 创建新 Session，保证 createSession 和 runAsync 使用同一个 SessionService。
+            String dynamicSessionId = runner.sessionService()
+                    .createSession(registerVO.getAppName(), userId)
+                    .blockingGet()
+                    .id();
+
+            persistMessage(userId, dynamicSessionId, agentId, "user", message);
 
             Content userMsg = Content.fromParts(Part.fromText(message));
             RunConfig runConfig = RunConfig.builder().setStreamingMode(RunConfig.StreamingMode.SSE).build();
 
             StringBuilder aiResponse = new StringBuilder();
-            return runner.runAsync(userId, sessionId, userMsg, runConfig)
+            return runner.runAsync(userId, dynamicSessionId, userMsg, runConfig)
                     .doOnNext(event -> {
                         String content = event.stringifyContent();
                         if (content != null && !content.isBlank()) {
@@ -254,14 +259,14 @@ public class ChatService implements IChatService {
                     .doOnComplete(() -> {
                         String response = aiResponse.toString();
                         if (!response.isBlank()) {
-                            persistMessage(userId, sessionId, agentId, "assistant", response);
+                            persistMessage(userId, dynamicSessionId, agentId, "assistant", response);
                         }
                     })
                     .doOnError(error -> {
-                        log.error("多租户流式对话异常 sessionId={} agentId={}: {}", sessionId, agentId, error.getMessage(), error);
+                        log.error("多租户流式对话异常 sessionId={} agentId={}: {}", dynamicSessionId, agentId, error.getMessage(), error);
                         String response = aiResponse.toString();
                         if (!response.isBlank()) {
-                            persistMessage(userId, sessionId, agentId, "assistant", response);
+                            persistMessage(userId, dynamicSessionId, agentId, "assistant", response);
                         }
                     });
         } catch (Exception e) {

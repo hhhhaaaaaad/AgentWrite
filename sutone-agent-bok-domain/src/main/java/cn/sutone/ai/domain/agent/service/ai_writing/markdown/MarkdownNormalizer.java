@@ -52,6 +52,7 @@ public final class MarkdownNormalizer {
         if (null == raw || raw.isBlank()) {
             return raw;
         }
+        // 预处理：修复解析器无法处理的转义畸形与结构断裂
         String pre = preprocess(raw);
         try {
             Node document = PARSER.parse(pre);
