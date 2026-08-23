@@ -16,6 +16,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -130,5 +133,58 @@ class AgentWritingRunnerTest {
         assertFalse(result.contains("\"type\""), "不应泄漏原始 JSON: " + result);
         assertTrue(result.contains("### 1.1微服务架构背景"), "杂散换行应被剔除并正确渲染标题: " + result);
         assertTrue(result.contains("过去十年间业务爆发式增长"), "应包含正文: " + result);
+    }
+
+    @Test
+    @DisplayName("启用配图时应按审查、配图分析、配图生成的真实顺序推送阶段")
+    void shouldPublishIllustrationPhasesInExecutionOrder() {
+        AiTaskEntity task = AiTaskEntity.initPending(
+                USER_ID, DRAFT_ID, AiWritingTaskTypeVO.GENERATE_BODY, "测试 prompt", true);
+        Event analystEvent = Event.builder()
+                .author("agent_writing_analyst")
+                .content(Content.fromParts(Part.fromText("分析结果")))
+                .build();
+        Event generatorEvent = Event.builder()
+                .author("agent_writing_generator")
+                .content(Content.fromParts(Part.fromText("生成预览")))
+                .build();
+        Event reviewerEvent = Event.builder()
+                .author("agent_writing_reviewer")
+                .content(Content.fromParts(Part.fromText(
+                        "{\"type\":\"md_paragraph\",\"text\":\"审查终稿\"}\n{\"type\":\"md_done\"}")))
+                .build();
+        Event drawEvent = Event.builder()
+                .author("agent_drawer")
+                .content(Content.fromParts(Part.fromText(
+                        "{\"type\":\"drawio_done\",\"content\":\"<mxGraphModel><root/></mxGraphModel>\"}")))
+                .build();
+
+        when(chatService.handleMessageStreamWithConfig(
+                eq(WORKFLOW_AGENT_ID), eq(String.valueOf(USER_ID)), eq("session-wf"), anyString(), any()))
+                .thenReturn(Flowable.just(analystEvent, generatorEvent, reviewerEvent));
+        when(chatService.createSession(eq("300003"), eq(String.valueOf(USER_ID)), eq(false)))
+                .thenReturn("session-illustration");
+        when(chatService.handleMessage(eq("300003"), eq(String.valueOf(USER_ID)),
+                eq("session-illustration"), anyString()))
+                .thenReturn(List.of(
+                        "{\"type\":\"illustration_request\",\"anchor\":\"审查终稿\","
+                                + "\"diagramType\":\"flowchart\",\"requirement\":\"绘制处理流程\"}"));
+        when(chatService.createSession(eq("300000"), eq(String.valueOf(USER_ID)), eq(false)))
+                .thenReturn("session-draw");
+        when(chatService.handleMessageStream(eq("300000"), eq(String.valueOf(USER_ID)),
+                eq("session-draw"), anyString()))
+                .thenReturn(Flowable.just(drawEvent));
+
+        List<String> statusPhases = new ArrayList<>();
+        String result = runner.run(task, event -> {
+            if ("status".equals(event.getChunk().getType())) {
+                statusPhases.add(event.getPhase());
+            }
+        });
+
+        assertEquals(List.of(
+                "analyzing", "generating", "reviewing",
+                "illustration_analyzing", "illustration_generating"), statusPhases);
+        assertTrue(result.contains("```drawio"));
     }
 }
