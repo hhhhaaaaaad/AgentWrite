@@ -5,6 +5,7 @@ import cn.sutone.ai.domain.agent.adapter.repository.IOutboxEventRepository;
 import cn.sutone.ai.domain.agent.model.entity.AiTaskEntity;
 import cn.sutone.ai.domain.agent.model.entity.OutboxEventEntity;
 import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingStreamEventVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingTaskTypeVO;
 import cn.sutone.ai.domain.agent.service.IAiWritingService;
@@ -485,12 +486,13 @@ public class AiWritingService implements IAiWritingService {
 
     private String buildPrompt(DraftEntity draft, AiWritingTaskTypeVO taskType, Map<String, Object> promptParams) {
         String extraParams = null == promptParams || promptParams.isEmpty() ? "{}" : String.valueOf(promptParams);
-        String customInstruction = null == promptParams ? null : (String) promptParams.get("customInstruction");
-        String selectedText = null == promptParams ? null : (String) promptParams.get("selectedText");
-        String formatInstruction = null == promptParams ? null : (String) promptParams.get("formatInstruction");
+        String customInstruction = null == promptParams ? null : objectToString(promptParams.get("customInstruction"));
+        String selectedText = null == promptParams ? null : objectToString(promptParams.get("selectedText"));
+        String formatInstruction = null == promptParams ? null : objectToString(promptParams.get("formatInstruction"));
         String customSuffix = null == customInstruction || customInstruction.isBlank() ? "" : "\n\n用户额外指令：%s".formatted(customInstruction);
         String formatHardRule = null == formatInstruction || formatInstruction.isBlank() ? "" : "\n\n【格式硬约束 - 必须遵守】\n%s".formatted(formatInstruction);
-        String memoryContext = memoryManager.retrieveContext(draft.getUserId(), draft.getContentMd(), 5);
+        MemoryRetrieveQueryVO memoryQuery = buildMemoryRetrieveQuery(draft, taskType, promptParams);
+        String memoryContext = memoryManager.retrieveContext(draft.getUserId(), memoryQuery, 5);
         String memoryPrefix = null == memoryContext || memoryContext.isBlank() ? "" : "【用户记忆上下文】\n" + memoryContext + "\n\n";
         return switch (taskType) {
             case GENERATE_OUTLINE -> memoryPrefix + """
@@ -584,6 +586,26 @@ public class AiWritingService implements IAiWritingService {
                     额外参数：%s%s
                     """.formatted(nullToEmpty(draft.getTitle()), nullToEmpty(draft.getSummary()), nullToEmpty(draft.getContentMd()), extraParams, customSuffix);
         };
+    }
+
+    private MemoryRetrieveQueryVO buildMemoryRetrieveQuery(DraftEntity draft, AiWritingTaskTypeVO taskType,
+                                                           Map<String, Object> promptParams) {
+        String customInstruction = null == promptParams ? null : objectToString(promptParams.get("customInstruction"));
+        String selectedText = null == promptParams ? null : objectToString(promptParams.get("selectedText"));
+        String formatInstruction = null == promptParams ? null : objectToString(promptParams.get("formatInstruction"));
+        return MemoryRetrieveQueryVO.builder()
+                .taskType(null == taskType ? null : taskType.getCode())
+                .title(draft.getTitle())
+                .summary(draft.getSummary())
+                .contentMd(draft.getContentMd())
+                .selectedText(selectedText)
+                .customInstruction(customInstruction)
+                .formatInstruction(formatInstruction)
+                .build();
+    }
+
+    private String objectToString(Object value) {
+        return null == value ? null : String.valueOf(value);
     }
 
     private String nullToEmpty(String value) { return null == value ? "" : value; }

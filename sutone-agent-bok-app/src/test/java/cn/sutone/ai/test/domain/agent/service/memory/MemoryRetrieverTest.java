@@ -5,9 +5,11 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.adapter.repository.IRerankerClient;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
+import cn.sutone.ai.domain.agent.service.memory.MemoryQueryNormalizer;
 import cn.sutone.ai.domain.agent.service.memory.MemoryRetriever;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +21,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -82,6 +85,10 @@ class MemoryRetrieverTest {
             var redisField = clazz.getDeclaredField("redisTemplate");
             redisField.setAccessible(true);
             redisField.set(retriever, redisTemplate);
+
+            var normalizerField = clazz.getDeclaredField("memoryQueryNormalizer");
+            normalizerField.setAccessible(true);
+            normalizerField.set(retriever, new MemoryQueryNormalizer());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -132,7 +139,7 @@ class MemoryRetrieverTest {
             List<MemoryRetriever.MemoryItem> results = retriever.search(1L, "", 5);
             assertTrue(results.isEmpty());
 
-            results = retriever.search(1L, null, 5);
+            results = retriever.search(1L, (String) null, 5);
             assertTrue(results.isEmpty());
         }
     }
@@ -179,6 +186,77 @@ class MemoryRetrieverTest {
 
             assertFalse(results.isEmpty());
             assertEquals(1L, (long) results.get(0).id());
+        }
+    }
+
+    @Nested
+    @DisplayName("结构化查询")
+    class StructuredQuery {
+
+        @Test
+        @DisplayName("应分别使用 semanticQuery 和 lexicalQuery")
+        void shouldUseSemanticAndLexicalQuerySeparately() {
+            float[] embedding = new float[]{0.1f, 0.2f};
+            when(embeddingClient.embed(anyString())).thenReturn(embedding);
+            when(vectorStore.search(eq(1L), any(), anyInt())).thenReturn(Collections.emptyList());
+
+            MemoryRecordEntity record = MemoryRecordEntity.create(1L, 1L, "fact", "用户偏好面试表达", "hash1", "s1");
+            record.setMatchScore(2.0);
+            when(memoryRepository.fulltextSearch(eq(1L), anyString(), anyInt())).thenReturn(List.of(record));
+            when(memoryRepository.queryById(eq(1L))).thenReturn(record);
+
+            MemoryRetrieveQueryVO query = MemoryRetrieveQueryVO.builder()
+                    .taskType("GENERATE_OUTLINE")
+                    .title("记忆系统混合检索设计")
+                    .summary("围绕 Qdrant、BM25、Reranker 展开")
+                    .customInstruction("偏面试表达")
+                    .build();
+
+            retriever.search(1L, query, 5);
+
+            verify(embeddingClient).embed(argThat(s -> s != null && s.contains("任务模式")));
+            verify(memoryRepository).fulltextSearch(eq(1L), argThat(s -> s != null && s.contains("面试表达")), anyInt());
+        }
+
+        @Test
+        @DisplayName("仅有任务类型的结构化查询应直接返回空结果")
+        void shouldReturnEmptyForTaskTypeOnlyStructuredQuery() {
+            MemoryRetrieveQueryVO query = MemoryRetrieveQueryVO.builder()
+                    .taskType("GENERATE_BODY")
+                    .build();
+
+            List<MemoryRetriever.MemoryItem> results = retriever.search(1L, query, 5);
+
+            assertTrue(results.isEmpty());
+            verify(embeddingClient, never()).embed(anyString());
+            verify(memoryRepository, never()).fulltextSearch(anyLong(), anyString(), anyInt());
+            verify(valueOps, never()).get(anyString());
+        }
+
+        @Test
+        @DisplayName("搜索缓存键应包含 digest 和 topK")
+        void shouldUseDigestAndTopKBasedSearchCacheKey() {
+            float[] embedding = new float[]{0.1f, 0.2f};
+            when(embeddingClient.embed(anyString())).thenReturn(embedding);
+            when(vectorStore.search(eq(1L), any(), anyInt())).thenReturn(Collections.emptyList());
+            when(memoryRepository.fulltextSearch(anyLong(), anyString(), anyInt())).thenReturn(Collections.emptyList());
+
+            MemoryRetrieveQueryVO query = MemoryRetrieveQueryVO.builder()
+                    .taskType("GENERATE_BODY")
+                    .title("AgentWrite 记忆系统")
+                    .summary("强调混合检索与记忆注入")
+                    .formatInstruction("使用 STAR 结构")
+                    .build();
+
+            String expectedDigest = new MemoryQueryNormalizer().normalize(query).getCacheKeyDigest();
+
+            retriever.search(1L, query, 5);
+            retriever.search(1L, query, 3);
+
+            verify(valueOps).get(eq("memory:user:1:search:v2:" + expectedDigest + ":topK:5:threshold:0.1000"));
+            verify(valueOps).set(eq("memory:user:1:search:v2:" + expectedDigest + ":topK:5:threshold:0.1000"), anyString(), anyLong(), eq(TimeUnit.MINUTES));
+            verify(valueOps).get(eq("memory:user:1:search:v2:" + expectedDigest + ":topK:3:threshold:0.1000"));
+            verify(valueOps).set(eq("memory:user:1:search:v2:" + expectedDigest + ":topK:3:threshold:0.1000"), anyString(), anyLong(), eq(TimeUnit.MINUTES));
         }
     }
 }

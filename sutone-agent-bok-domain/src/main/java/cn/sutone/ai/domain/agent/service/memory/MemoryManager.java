@@ -5,6 +5,7 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import lombok.extern.slf4j.Slf4j;
@@ -105,7 +106,7 @@ public class MemoryManager {
         List<float[]> embeddings = embeddingClient.embedBatch(texts);
         boolean hasEmbeddings = embeddings.stream().anyMatch(e -> e.length > 0);
 
-        // Phase 4: Hash 去重
+        // Phase 4: Hash 去重  将第 1 步检索到的topK的前10就转换为set
         Set<String> existingHashes = existingMemories.stream()
                 .map(MemoryRecordEntity::getContentHash)
                 .filter(Objects::nonNull)
@@ -116,6 +117,7 @@ public class MemoryManager {
         for (int i = 0; i < candidates.size(); i++) {
             String text = texts.get(i);
             String hash = DigestUtils.md5Hex(text);
+            // 判断是否重复 1. 已存在记忆 2. 批量处理中已存在
             if (existingHashes.contains(hash) || batchHashes.contains(hash)) {
                 log.debug("跳过重复记忆(hash): {}", text.length() > 30 ? text.substring(0, 30) : text);
                 continue;
@@ -163,6 +165,7 @@ public class MemoryManager {
         for (int i = 0; i < toInsert.size(); i++) {
             MemoryRecordEntity record = toInsert.get(i);
             try {
+                // 优先存储 MySQL
                 memoryRepository.insert(record);
                 if (hasEmbeddings && embeddings.size() > i && embeddings.get(i).length > 0) {
                     try {
@@ -195,7 +198,21 @@ public class MemoryManager {
         if (!injectEnabled) {
             return "";
         }
+        if (queryContext == null || queryContext.isBlank()) {
+            return "";
+        }
         return memoryRetriever.retrieveFormattedContext(userId, queryContext, topK);
+    }
+
+    /** 为 Agent prompt 格式化记忆上下文（结构化查询） */
+    public String retrieveContext(Long userId, MemoryRetrieveQueryVO query, int topK) {
+        if (!injectEnabled) {
+            return "";
+        }
+        if (query == null) {
+            return "";
+        }
+        return memoryRetriever.retrieveFormattedContext(userId, query, topK);
     }
 
     /** 单条记忆详情 */

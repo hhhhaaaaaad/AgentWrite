@@ -5,6 +5,8 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.adapter.repository.IRerankerClient;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
+import cn.sutone.ai.domain.agent.model.valobj.NormalizedMemoryQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +17,7 @@ import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -48,22 +51,52 @@ public class MemoryRetriever {
     @Resource
     private RedisTemplate<String, String> redisTemplate;
 
+    @Resource
+    private MemoryQueryNormalizer memoryQueryNormalizer;
+
     /**
      * 混合检索：语义 + BM25 融合
      *
      * @return 按融合分数降序排列的记忆列表
      */
     public List<MemoryItem> search(Long userId, String query, int topK) {
-        return search(userId, query, topK, DEFAULT_THRESHOLD);
+        if (query == null || query.isBlank()) {
+            return Collections.emptyList();
+        }
+        MemoryRetrieveQueryVO queryVO = MemoryRetrieveQueryVO.builder()
+                .taskType("LEGACY")
+                .contentMd(query)
+                .build();
+        return search(userId, queryVO, topK, DEFAULT_THRESHOLD);
     }
 
     public List<MemoryItem> search(Long userId, String query, int topK, double threshold) {
         if (query == null || query.isBlank()) {
             return Collections.emptyList();
         }
+        MemoryRetrieveQueryVO queryVO = MemoryRetrieveQueryVO.builder()
+                .taskType("LEGACY")
+                .contentMd(query)
+                .build();
+        return search(userId, queryVO, topK, threshold);
+    }
+
+    public List<MemoryItem> search(Long userId, MemoryRetrieveQueryVO query, int topK) {
+        return search(userId, query, topK, DEFAULT_THRESHOLD);
+    }
+
+    public List<MemoryItem> search(Long userId, MemoryRetrieveQueryVO query, int topK, double threshold) {
+        NormalizedMemoryQueryVO normalized = normalizer().normalize(query);
+        String semanticQuery = normalized.getSemanticQuery();
+        String lexicalQuery = normalized.getLexicalQuery();
+        if ((semanticQuery == null || semanticQuery.isBlank()) && (lexicalQuery == null || lexicalQuery.isBlank())) {
+            return Collections.emptyList();
+        }
 
         // Step 0: 搜索缓存
-        String searchCacheKey = "memory:user:" + userId + ":search:" + query.hashCode();
+        String thresholdToken = String.format(Locale.ROOT, "%.4f", threshold);
+        String searchCacheKey = "memory:user:" + userId + ":search:v2:" + normalized.getCacheKeyDigest()
+                + ":topK:" + topK + ":threshold:" + thresholdToken;
         try {
             String cached = redisTemplate.opsForValue().get(searchCacheKey);
             if (cached != null) {
@@ -74,7 +107,9 @@ public class MemoryRetriever {
         }
 
         // Step 1: embed 查询（可能返回空数组，表示 embedding 不可用）
-        float[] queryEmbedding = embeddingClient.embed(query);
+        float[] queryEmbedding = semanticQuery == null || semanticQuery.isBlank()
+                ? new float[0]
+                : embeddingClient.embed(semanticQuery);
         boolean hasEmbedding = queryEmbedding.length > 0;
 
         List<ScoredMemory> semanticResults = Collections.emptyList();
@@ -85,7 +120,7 @@ public class MemoryRetriever {
 
         // Step 2: BM25 关键词搜索 + 画像缓存注入
         int overFetch = Math.max(topK * DEFAULT_OVER_FETCH_FACTOR, 60);
-        Map<Long, Double> bm25Scores = executeBm25Search(userId, query, overFetch);
+        Map<Long, Double> bm25Scores = executeBm25Search(userId, lexicalQuery, overFetch);
 
         List<ScoredMemory> profileResults = loadProfileCache(userId);
 
@@ -139,7 +174,7 @@ public class MemoryRetriever {
             List<ScoredMemory> toRerank = scored.stream()
                     .map(item -> new ScoredMemory(item.id(), item.content(), item.score(), item.importance(), null, null))
                     .toList();
-            List<ScoredMemory> reranked = rerankerClient.rerank(query, toRerank, RERANK_TOP_N);
+            List<ScoredMemory> reranked = rerankerClient.rerank(semanticQuery, toRerank, RERANK_TOP_N);
             results = reranked.stream()
                     .map(r -> new MemoryItem(r.id(), r.content(), r.score(), r.importance()))
                     .collect(Collectors.toList());
@@ -168,7 +203,18 @@ public class MemoryRetriever {
      * 使用草稿内容作为查询，搜索最相关的用户记忆
      */
     public String retrieveFormattedContext(Long userId, String queryContext, int topK) {
-        List<MemoryItem> memories = search(userId, queryContext, topK);
+        if (queryContext == null || queryContext.isBlank()) {
+            return "";
+        }
+        MemoryRetrieveQueryVO queryVO = MemoryRetrieveQueryVO.builder()
+                .taskType("LEGACY")
+                .contentMd(queryContext)
+                .build();
+        return retrieveFormattedContext(userId, queryVO, topK);
+    }
+
+    public String retrieveFormattedContext(Long userId, MemoryRetrieveQueryVO query, int topK) {
+        List<MemoryItem> memories = search(userId, query, topK);
         if (memories.isEmpty()) {
             return "";
         }
@@ -301,5 +347,12 @@ public class MemoryRetriever {
 
     /** 对外暴露的记忆检索结果 */
     public record MemoryItem(Long id, String content, double score, Double importance) {
+    }
+
+    private MemoryQueryNormalizer normalizer() {
+        if (memoryQueryNormalizer == null) {
+            memoryQueryNormalizer = new MemoryQueryNormalizer();
+        }
+        return memoryQueryNormalizer;
     }
 }

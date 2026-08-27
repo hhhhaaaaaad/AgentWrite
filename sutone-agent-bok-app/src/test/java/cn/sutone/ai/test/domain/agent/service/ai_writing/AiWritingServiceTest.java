@@ -8,6 +8,7 @@ import cn.sutone.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiTaskStatusVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingStreamEventVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingTaskTypeVO;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.service.IChatService;
 import cn.sutone.ai.domain.agent.service.ITaskEventPublisher;
 import cn.sutone.ai.domain.agent.service.ai_writing.AgentWritingRunner;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
@@ -171,6 +173,41 @@ class AiWritingServiceTest {
             assertThrows(Exception.class, () ->
                     aiWritingService.submitTask(USER_ID, DRAFT_ID, "INVALID_TYPE", null, false));
             verify(aiTaskRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("应使用结构化记忆检索 query 而非仅正文")
+        void shouldBuildStructuredMemoryQuery() {
+            DraftEntity draft = DraftEntity.initNewDraft(DRAFT_ID, USER_ID, "记忆系统设计", "", "介绍混合检索", "https://cover.url");
+            when(draftDomainService.queryDraftDetail(DRAFT_ID, USER_ID)).thenReturn(draft);
+
+            aiWritingService.submitTask(USER_ID, DRAFT_ID, "GENERATE_OUTLINE", Map.of("customInstruction", "偏面试表达"), false);
+
+            ArgumentCaptor<MemoryRetrieveQueryVO> captor = ArgumentCaptor.forClass(MemoryRetrieveQueryVO.class);
+            verify(memoryManager).retrieveContext(eq(USER_ID), captor.capture(), eq(5));
+            MemoryRetrieveQueryVO query = captor.getValue();
+            assertEquals("GENERATE_OUTLINE", query.getTaskType());
+            assertEquals("记忆系统设计", query.getTitle());
+            assertEquals("介绍混合检索", query.getSummary());
+            assertEquals("", query.getContentMd());
+            assertEquals("偏面试表达", query.getCustomInstruction());
+        }
+
+        @Test
+        @DisplayName("润色场景应把 selectedText 放入结构化记忆检索 query")
+        void shouldIncludeSelectedTextInStructuredMemoryQuery() {
+            DraftEntity draft = editingDraft();
+            when(draftDomainService.queryDraftDetail(DRAFT_ID, USER_ID)).thenReturn(draft);
+
+            aiWritingService.submitTask(USER_ID, DRAFT_ID, "POLISH_TEXT",
+                    Map.of("selectedText", "这里是选中文本", "customInstruction", "更偏面试表达"), false);
+
+            ArgumentCaptor<MemoryRetrieveQueryVO> captor = ArgumentCaptor.forClass(MemoryRetrieveQueryVO.class);
+            verify(memoryManager).retrieveContext(eq(USER_ID), captor.capture(), eq(5));
+            MemoryRetrieveQueryVO query = captor.getValue();
+            assertEquals("POLISH_TEXT", query.getTaskType());
+            assertEquals("这里是选中文本", query.getSelectedText());
+            assertEquals("更偏面试表达", query.getCustomInstruction());
         }
     }
 
