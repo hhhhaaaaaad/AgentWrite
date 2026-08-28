@@ -36,8 +36,8 @@ public interface IMemoryRepository {
     /** 查询 PENDING 状态的记录（补偿任务用） */
     List<MemoryRecordEntity> selectPendingVectors();
 
-    /** 根据 userId+importance 降序查询 top-N（缓存降级用） */
-    List<MemoryRecordEntity> queryTopByAccessCount(Long userId, int limit);
+    /** 按 importance/access/recency 查询高价值画像记忆 */
+    List<MemoryRecordEntity> queryTopProfiles(Long userId, double minImportance, int limit);
 
     /** 更新重要性 */
     void updateImportance(Long id, double importance);

@@ -32,6 +32,7 @@ public class MemoryRetriever {
     private static final int DEFAULT_OVER_FETCH_FACTOR = 6;  // 扩大粗排以喂给 Reranker
     private static final int RERANK_TOP_N = 5;
     private static final double BM25_MERGE_THRESHOLD = 0.5;
+    private static final double MIN_COMBINED_SCORE = 0.15;
 
     @Resource
     private IMemoryEmbeddingClient embeddingClient;
@@ -140,7 +141,7 @@ public class MemoryRetriever {
         for (ScoredMemory r : semanticResults) {
             if (r.content() == null || !seenIds.add(r.id())) continue;
             double semanticScore = r.score();
-            if (semanticScore < threshold) continue;
+            if (semanticScore < threshold) continue;  // 语义分数低于阈值，跳过
 
             double bm25Score = bm25Scores.getOrDefault(r.id(), 0.0);
             double recencyBoost = computeRecencyBoost(r.lastAccessedAt());
@@ -167,8 +168,12 @@ public class MemoryRetriever {
             }
         }
 
-        // Step 4: Reranker 精排
         scored.sort((a, b) -> Double.compare(b.score(), a.score()));
+        scored = scored.stream()
+                .filter(item -> item.score() >= MIN_COMBINED_SCORE)
+                .collect(Collectors.toList());
+
+        // Step 4: Reranker 精排
         List<MemoryItem> results;
         if (scored.size() > RERANK_TOP_N) {
             List<ScoredMemory> toRerank = scored.stream()
@@ -310,9 +315,10 @@ public class MemoryRetriever {
             if (cached != null) {
                 return deserializeScoredMemories(cached);
             }
-            // 缓存未命中：从 DB 加载，用 importance 或 access_count 降级
+            // 缓存未命中：按重要性优先回源，保留真正高价值的用户画像
             int maxItems = memoryProperties.getCache().getProfileMaxItems();
-            List<MemoryRecordEntity> hot = memoryRepository.queryByUserId(userId, 0, maxItems);
+            double minImportance = memoryProperties.getCache().getHotImportanceThreshold();
+            List<MemoryRecordEntity> hot = memoryRepository.queryTopProfiles(userId, minImportance, maxItems);
             if (hot.isEmpty()) return Collections.emptyList();
             List<ScoredMemory> result = hot.stream()
                     .map(r -> new ScoredMemory(r.getId(), r.getContent(), 0.85, r.getImportance(),
@@ -320,7 +326,7 @@ public class MemoryRetriever {
                     .toList();
             try {
                 redisTemplate.opsForValue().set(key, serializeScoredMemories(result),
-                        memoryProperties.getCache().getProfileTtlMinutes(), java.util.concurrent.TimeUnit.MINUTES);
+                        memoryProperties.getCache().getProfileTtlMinutes(), java.util.concurrent.TimeUnit.MINUTES); // 10 分钟的过期时间
             } catch (Exception ignored) {}
             return result;
         } catch (Exception e) {

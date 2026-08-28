@@ -125,8 +125,8 @@ public class MemoryRepository implements IMemoryRepository {
     }
 
     @Override
-    public List<MemoryRecordEntity> queryTopByAccessCount(Long userId, int limit) {
-        return memoryRecordDao.selectTopByAccessCount(userId, limit).stream()
+    public List<MemoryRecordEntity> queryTopProfiles(Long userId, double minImportance, int limit) {
+        return memoryRecordDao.selectTopProfiles(userId, minImportance, limit).stream()
                 .map(this::toEntity)
                 .collect(Collectors.toList());
     }

@@ -99,10 +99,13 @@ public interface IMemoryRecordDao {
                    create_time, update_time, is_deleted
             FROM memory_record
             WHERE user_id = #{userId} AND is_deleted = 0
-            ORDER BY access_count DESC
+              AND importance >= #{minImportance}
+            ORDER BY importance DESC, access_count DESC, last_accessed_at DESC, create_time DESC
             LIMIT #{limit}
             """)
-    List<MemoryRecordPO> selectTopByAccessCount(@Param("userId") Long userId, @Param("limit") int limit);
+    List<MemoryRecordPO> selectTopProfiles(@Param("userId") Long userId,
+                                           @Param("minImportance") double minImportance,
+                                           @Param("limit") int limit);
 
     @Update("UPDATE memory_record SET vector_status = #{status}, retry_count = IFNULL(retry_count, 0) + 1 WHERE id = #{id}")
     int updateVectorStatusWithRetry(@Param("id") Long id, @Param("status") String status);
