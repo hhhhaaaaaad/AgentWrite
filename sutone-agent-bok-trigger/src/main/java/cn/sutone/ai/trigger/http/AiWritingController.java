@@ -4,12 +4,16 @@ import cn.sutone.ai.api.dto.aiwriting.AiWritingChunkDTO;
 import cn.sutone.ai.api.dto.aiwriting.AiWritingStreamEventDTO;
 import cn.sutone.ai.api.dto.aiwriting.SubmitAiTaskRequestDTO;
 import cn.sutone.ai.api.dto.aiwriting.SubmitAiTaskResponseDTO;
+import cn.sutone.ai.api.dto.aiwriting.intent.PrecheckAiTaskRequestDTO;
+import cn.sutone.ai.api.dto.aiwriting.intent.PrecheckAiTaskResponseDTO;
 import cn.sutone.ai.api.response.Response;
 import cn.sutone.ai.domain.agent.model.entity.AiTaskEntity;
 import cn.sutone.ai.domain.agent.model.valobj.AiTaskStatusVO;
 import cn.sutone.ai.domain.agent.model.valobj.AiWritingStreamEventVO;
 import cn.sutone.ai.domain.agent.service.IAiWritingService;
 import cn.sutone.ai.domain.agent.service.ITaskEventPublisher;
+import cn.sutone.ai.domain.agent.service.ai_writing.intent.WritingIntentGuardService;
+import cn.sutone.ai.domain.agent.service.ai_writing.intent.model.WritingIntentPrecheckResultVO;
 import cn.sutone.ai.trigger.security.AuthUtil;
 import cn.sutone.ai.types.enums.ResponseCode;
 import cn.sutone.ai.types.exception.AppException;
@@ -45,6 +49,9 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
     @Resource
     private ITaskEventPublisher taskEventPublisher;
 
+    @Resource
+    private WritingIntentGuardService writingIntentGuardService;
+
     /** SSE 连接注册表: taskId -> emitter */
     private final Map<Long, ResponseBodyEmitter> sseConnections = new ConcurrentHashMap<>();
 
@@ -71,14 +78,21 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
     @Override
     public Response<SubmitAiTaskResponseDTO> submitTask(@RequestBody SubmitAiTaskRequestDTO requestDTO) {
         try {
+            Long userId = AuthUtil.getCurrentUserId();
             log.info("提交 AI 写作任务 draftId:{} taskType:{}", requestDTO.getDraftId(), requestDTO.getTaskType());
+            // 前置守卫校验（灰度）：precheckToken 兜底
+            writingIntentGuardService.verifySubmit(userId, requestDTO.getDraftId(), requestDTO.getTaskType(),
+                    requestDTO.getPromptParams(), requestDTO.getPrecheckToken());
             AiTaskEntity task = aiWritingService.submitTask(
-                    AuthUtil.getCurrentUserId(),
+                    userId,
                     requestDTO.getDraftId(),
                     requestDTO.getTaskType(),
                     requestDTO.getPromptParams(),
                     requestDTO.getEnableIllustration()
             );
+            if (requestDTO.getPrecheckToken() != null && !requestDTO.getPrecheckToken().isBlank()) {
+                writingIntentGuardService.consume(requestDTO.getPrecheckToken());
+            }
             return Response.<SubmitAiTaskResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())
                     .info(ResponseCode.SUCCESS.getInfo())
@@ -86,6 +100,34 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
                     .build();
         } catch (Exception e) {
             log.error("提交 AI 写作任务失败", e);
+            return fail(e);
+        }
+    }
+
+    /**
+     * 写作意图预检
+     *
+     * <p>在任务创建前同步判断当前请求是否适合进入文章写作链路，返回 PASS / BLOCK / CONFIRM_REQUIRED。
+     * PASS 与 CONFIRM_REQUIRED 会签发 precheckToken，前端据此调用 {@link #submitTask}。</p>
+     */
+    @PostMapping("ai-writing/task/precheck")
+    public Response<PrecheckAiTaskResponseDTO> precheck(@RequestBody PrecheckAiTaskRequestDTO requestDTO) {
+        try {
+            Long userId = AuthUtil.getCurrentUserId();
+            WritingIntentPrecheckResultVO result = writingIntentGuardService.precheck(
+                    userId,
+                    requestDTO.getDraftId(),
+                    requestDTO.getTaskType(),
+                    requestDTO.getPromptParams(),
+                    requestDTO.getEnableIllustration()
+            );
+            return Response.<PrecheckAiTaskResponseDTO>builder()
+                    .code(ResponseCode.SUCCESS.getCode())
+                    .info(ResponseCode.SUCCESS.getInfo())
+                    .data(toPrecheckDTO(result))
+                    .build();
+        } catch (Exception e) {
+            log.error("写作意图预检失败", e);
             return fail(e);
         }
     }
@@ -306,6 +348,22 @@ public class AiWritingController implements cn.sutone.ai.api.IAiWritingService {
                 .taskType(task.getTaskType().getCode())
                 .status(task.getStatus().getCode())
                 .statusDesc(task.getStatus().getDesc())
+                .build();
+    }
+
+    /**
+     * 将领域层预检结果转换为 API 响应 DTO
+     */
+    private PrecheckAiTaskResponseDTO toPrecheckDTO(WritingIntentPrecheckResultVO result) {
+        return PrecheckAiTaskResponseDTO.builder()
+                .decision(result.getDecision() == null ? null : result.getDecision().getCode())
+                .intent(result.getIntent() == null ? null : result.getIntent().getCode())
+                .confidence(result.getConfidence())
+                .reason(result.getReason())
+                .suggestedAction(result.getSuggestedAction())
+                .precheckToken(result.getPrecheckToken())
+                .tokenType(result.getTokenType())
+                .tokenExpireSeconds(result.getTokenExpireSeconds())
                 .build();
     }
 

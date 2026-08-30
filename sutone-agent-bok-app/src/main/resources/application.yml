@@ -28,6 +28,16 @@ ai-writing:
   recovery:
     running-timeout-minutes: 5
     max-retry-count: 3
+  # AI 写作意图守卫（灰度开关）
+  guard:
+    # 规则预筛开关（先规则后模型）
+    rule-enabled: true
+    # 模型二判开关（需先注册轻量分类 Agent）
+    model-enabled: true
+    # 轻量意图分类 Agent ID（与单 Agent 写作 300005 隔离）
+    classifier-agent-id: 300006
+    # submit 侧是否强制要求 precheckToken：灰度期 false（缺失放行+打点），全量验证后切 true
+    enforce: false
 
 # API Key 加密密钥（多租户模型配置）
 # 生产环境必须通过环境变量覆盖，默认值仅用于本地开发

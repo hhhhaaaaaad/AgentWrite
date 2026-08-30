@@ -26,4 +26,7 @@ public class SubmitAiTaskRequestDTO implements Serializable {
     //formatInstruction	格式硬约束	前端根据场景预设的格式规则
     private Map<String, Object> promptParams;
     private Boolean enableIllustration;
+
+    /** 写作意图预检凭证（灰度期可缺省，强制期必填） */
+    private String precheckToken;
 }

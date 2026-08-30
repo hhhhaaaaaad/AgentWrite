@@ -12,7 +12,12 @@ public enum ResponseCode {
     UNAUTHORIZED("0004", "未登录或认证信息已过期"),
 
     E0001("E0001", "智能体ID不存在"),
-    E0002("E0002", "智能体MCP配置不在可加载范围");
+    E0002("E0002", "智能体MCP配置不在可加载范围"),
+
+    /** AI 写作意图预检相关 */
+    PRECHECK_REQUIRED("0005", "请先完成写作意图预检"),
+    PRECHECK_TOKEN_INVALID("0006", "确认信息已过期或不匹配，请重新提交"),
+    PRECHECK_RATE_LIMIT("0007", "AI 请求过于频繁，请稍后再试");
 
     private String code;
     private String info;

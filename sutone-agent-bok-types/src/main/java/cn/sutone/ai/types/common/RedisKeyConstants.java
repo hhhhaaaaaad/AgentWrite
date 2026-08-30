@@ -19,6 +19,18 @@ public final class RedisKeyConstants {
     /** AI 任务防重复提交锁 */
     public static final String AI_TASK_LOCK_PREFIX = "ai:task:lock:";
 
+    /** AI 写作意图预检凭证 token */
+    public static final String PRECHECK_TOKEN_PREFIX = "ai:precheck:token:";
+
+    /** AI 写作意图预检结果缓存 */
+    public static final String PRECHECK_CACHE_PREFIX = "ai:precheck:cache:";
+
+    /** AI 写作意图预检接口限流 */
+    public static final String PRECHECK_RATE_LIMIT_PREFIX = "ai:precheck:limit:";
+
+    /** AI 写作意图预检模型二判限流 */
+    public static final String PRECHECK_MODEL_RATE_LIMIT_PREFIX = "ai:precheck:model:limit:";
+
     /** 文章点赞用户集合 */
     public static final String ARTICLE_LIKE_PREFIX = "article:like:";
 
