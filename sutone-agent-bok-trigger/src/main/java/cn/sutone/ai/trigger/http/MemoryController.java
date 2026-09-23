@@ -5,6 +5,7 @@ import cn.sutone.ai.api.dto.memory.MemoryListResponseDTO;
 import cn.sutone.ai.api.dto.memory.MemorySearchResponseDTO;
 import cn.sutone.ai.api.response.Response;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.exception.MemoryAccessDeniedException;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
 import cn.sutone.ai.domain.agent.service.memory.MemoryRetriever;
 import cn.sutone.ai.types.enums.ResponseCode;
@@ -123,12 +124,20 @@ public class MemoryController {
      */
     @GetMapping("/{id}")
     public Response<MemoryItemDTO> detail(@PathVariable("id") Long id) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return Response.<MemoryItemDTO>builder()
+                    .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
+                    .info("用户未登录")
+                    .build();
+        }
         try {
             MemoryRecordEntity record = memoryManager.get(id);
-            if (record == null) {
+            // 归属校验：不区分「不存在」与「无权访问」，防 ID 枚举
+            if (record == null || !userId.equals(record.getUserId())) {
                 return Response.<MemoryItemDTO>builder()
                         .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
-                        .info("记忆不存在")
+                        .info("记忆不存在或无权访问")
                         .build();
             }
             MemoryItemDTO dto = MemoryItemDTO.builder()
@@ -159,12 +168,25 @@ public class MemoryController {
      */
     @DeleteMapping("/{id}")
     public Response<String> delete(@PathVariable("id") Long id) {
+        Long userId = getCurrentUserId();
+        if (userId == null) {
+            return Response.<String>builder()
+                    .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
+                    .info("用户未登录")
+                    .build();
+        }
         try {
-            memoryManager.delete(id);
+            memoryManager.delete(userId, id);
             return Response.<String>builder()
                     .code(ResponseCode.SUCCESS.getCode())
                     .info(ResponseCode.SUCCESS.getInfo())
                     .data("ok")
+                    .build();
+        } catch (MemoryAccessDeniedException e) {
+            // 归属校验失败：不区分「不存在」与「无权访问」，防 ID 枚举
+            return Response.<String>builder()
+                    .code(ResponseCode.ILLEGAL_PARAMETER.getCode())
+                    .info("记忆不存在或无权访问")
                     .build();
         } catch (Exception e) {
             log.error("记忆删除失败 id={}", id, e);

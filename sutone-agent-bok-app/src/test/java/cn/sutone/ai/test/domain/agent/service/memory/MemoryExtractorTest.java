@@ -176,6 +176,88 @@ class MemoryExtractorTest {
                 fail("Reflection failed: " + e.getMessage());
             }
         }
+
+        @Test
+        @DisplayName("解析新结构化字段（operation/target_memory_id/subject/predicate/value/evidence/confidence）")
+        void shouldParseStructuredFields() {
+            try {
+                var parseMethod = MemoryExtractor.class.getDeclaredMethod("parseResponse", String.class);
+                parseMethod.setAccessible(true);
+
+                String json = """
+                    {
+                      "memory": [
+                        {"text":"技术栈 Java 17","type":"fact","attributed_to":"user",
+                         "operation":"UPDATE","target_memory_id":42,
+                         "subject":"user","predicate":"tech_stack","value":"Java 17",
+                         "evidence":"我们项目用 Java 17","confidence":0.9}
+                      ]
+                    }""";
+
+                @SuppressWarnings("unchecked")
+                List<MemoryCandidate> results = (List<MemoryCandidate>) parseMethod.invoke(extractor, json);
+                assertEquals(1, results.size());
+                MemoryCandidate c = results.get(0);
+                assertEquals("UPDATE", c.operation());
+                assertEquals(42L, c.targetMemoryId());
+                assertEquals("user", c.subject());
+                assertEquals("tech_stack", c.predicate());
+                assertEquals("Java 17", c.value());
+                assertEquals("我们项目用 Java 17", c.evidence());
+                assertEquals(0.9, c.confidence(), 0.001);
+            } catch (Exception e) {
+                fail("Reflection failed: " + e.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("operation 缺省为 ADD，target_memory_id=0 归一为 null")
+        void shouldDefaultOperationAndNormalizeZeroTarget() {
+            try {
+                var parseMethod = MemoryExtractor.class.getDeclaredMethod("parseResponse", String.class);
+                parseMethod.setAccessible(true);
+
+                String json = """
+                    {
+                      "memory": [
+                        {"text":"技术栈 Java 17","type":"fact","attributed_to":"user","target_memory_id":0}
+                      ]
+                    }""";
+
+                @SuppressWarnings("unchecked")
+                List<MemoryCandidate> results = (List<MemoryCandidate>) parseMethod.invoke(extractor, json);
+                assertEquals(1, results.size());
+                assertEquals("ADD", results.get(0).operation());
+                assertNull(results.get(0).targetMemoryId());
+            } catch (Exception e) {
+                fail("Reflection failed: " + e.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("confidence 缺省时按 evidence 有无推断（有 0.8 / 无 0.3）")
+        void shouldInferConfidenceByEvidence() {
+            try {
+                var parseMethod = MemoryExtractor.class.getDeclaredMethod("parseResponse", String.class);
+                parseMethod.setAccessible(true);
+
+                String json = """
+                    {
+                      "memory": [
+                        {"text":"带证据","type":"fact","attributed_to":"user","evidence":"原文片段"},
+                        {"text":"无证据","type":"preference","attributed_to":"user"}
+                      ]
+                    }""";
+
+                @SuppressWarnings("unchecked")
+                List<MemoryCandidate> results = (List<MemoryCandidate>) parseMethod.invoke(extractor, json);
+                assertEquals(2, results.size());
+                assertEquals(0.8, results.get(0).confidence(), 0.001);
+                assertEquals(0.3, results.get(1).confidence(), 0.001);
+            } catch (Exception e) {
+                fail("Reflection failed: " + e.getMessage());
+            }
+        }
     }
 
     @Nested

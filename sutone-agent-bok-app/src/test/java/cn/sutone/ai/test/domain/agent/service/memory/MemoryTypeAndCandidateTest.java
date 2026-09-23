@@ -66,5 +66,38 @@ class MemoryTypeAndCandidateTest {
             MemoryCandidate c = new MemoryCandidate("test", "fact", null);
             assertNull(c.attributedTo());
         }
+
+        @Test
+        @DisplayName("旧三参构造缺省 operation=ADD，其余字段为 null")
+        void shouldDefaultOperationAndNullStructuredFields() {
+            MemoryCandidate c = new MemoryCandidate("用户偏好Java", "preference", "user");
+
+            assertEquals("ADD", c.operation());
+            assertNull(c.targetMemoryId());
+            assertNull(c.subject());
+            assertNull(c.predicate());
+            assertNull(c.value());
+            assertNull(c.evidence());
+            assertNull(c.confidence());
+        }
+
+        @Test
+        @DisplayName("全参构造结构化字段正确")
+        void shouldSetAllStructuredFields() {
+            MemoryCandidate c = new MemoryCandidate(
+                    "技术栈 Java 17", "fact", "user", "UPDATE", 42L,
+                    "user", "tech_stack", "Java 17", "原文证据", 0.9);
+
+            assertEquals("技术栈 Java 17", c.content());
+            assertEquals("fact", c.type());
+            assertEquals("user", c.attributedTo());
+            assertEquals("UPDATE", c.operation());
+            assertEquals(42L, c.targetMemoryId());
+            assertEquals("user", c.subject());
+            assertEquals("tech_stack", c.predicate());
+            assertEquals("Java 17", c.value());
+            assertEquals("原文证据", c.evidence());
+            assertEquals(0.9, c.confidence(), 0.001);
+        }
     }
 }

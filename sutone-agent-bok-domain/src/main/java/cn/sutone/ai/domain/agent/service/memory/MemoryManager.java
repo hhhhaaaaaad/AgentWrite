@@ -1,22 +1,29 @@
 package cn.sutone.ai.domain.agent.service.memory;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.exception.MemoryAccessDeniedException;
+import cn.sutone.ai.domain.agent.model.valobj.EmbeddedMemoryCandidate;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryStatus;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
+import cn.sutone.ai.domain.agent.service.memory.circuit.MemoryCircuitBreaker;
+import cn.sutone.ai.domain.agent.service.memory.trace.MemoryTraceId;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -26,9 +33,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class MemoryManager {
-
-    @Value("${memory.inject.enabled:true}")
-    private boolean injectEnabled;
 
     @Resource
     private IMemoryRepository memoryRepository;
@@ -45,6 +49,18 @@ public class MemoryManager {
     @Resource
     private MemoryRetriever memoryRetriever;
 
+    @Resource
+    private MemoryPersistService memoryPersistService;
+
+    @Resource
+    private RedisTemplate<String, String> redisTemplate;
+
+    @Resource
+    private IMemoryMetricsPort metrics;
+
+    @Resource
+    private MemoryCircuitBreaker memoryCircuitBreaker;
+
     /**
      * 异步写入记忆 — V3 完整 Pipeline（8 阶段）
      * 触发时机：用户保存文章后
@@ -52,16 +68,29 @@ public class MemoryManager {
     @Async("memoryExecutor")
     public void addAsync(Long userId, Long agentId, String sessionId,
                          List<Map<String, String>> messages) {
+        String traceId = MemoryTraceId.next();  // P0 埋点：本线程 MDC 关联 trace_id
         try {
-            this.add(userId, agentId, sessionId, messages);
+            this.add(userId, agentId, sessionId, messages, traceId);
         } catch (Exception e) {
             log.error("记忆抽取失败 userId={} sessionId={}: {}", userId, sessionId, e.getMessage(), e);
+        } finally {
+            MemoryTraceId.clear();
         }
     }
 
-    /** V3 Pipeline 主流程 */
+    /** V3 Pipeline 主流程（计时包装，端到端抽取存储耗时记 pipeline.duration） */
     private void add(Long userId, Long agentId, String sessionId,
-                     List<Map<String, String>> messages) {
+                     List<Map<String, String>> messages, String traceId) {
+        long start = System.nanoTime();
+        try {
+            doAdd(userId, agentId, sessionId, messages, traceId);
+        } finally {
+            metrics.recordPipelineDuration(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+        }
+    }
+
+    private void doAdd(Long userId, Long agentId, String sessionId,
+                       List<Map<String, String>> messages, String traceId) {
         if (messages == null || messages.isEmpty()) {
             log.info("记忆抽取跳过: 无消息内容");
             return;
@@ -85,10 +114,20 @@ public class MemoryManager {
         List<MemoryRecordEntity> existingMemories;
         if (queryEmbedding.length > 0) {
             List<ScoredMemory> existingScored = vectorStore.search(userId, queryEmbedding, 10);
+            Set<Long> ids = existingScored.stream()
+                    .map(ScoredMemory::id)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
             existingMemories = existingScored.stream()
                     .map(s -> memoryRepository.queryById(s.id()))
                     .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
+                    .collect(Collectors.toCollection(ArrayList::new));
+            // P1-5: 关键词补召回（精确版本号/类名/缩写），ID 去重后合并
+            List<MemoryRecordEntity> keywordResults = memoryRepository.fulltextSearch(userId, combinedText, 10);
+            for (MemoryRecordEntity k : (keywordResults != null ? keywordResults : Collections.<MemoryRecordEntity>emptyList())) {
+                if (ids.add(k.getId())) {
+                    existingMemories.add(k);
+                }
+            }
         } else {
             // embedding 不可用时，用 BM25 检索已有记忆
             List<MemoryRecordEntity> keywordResults = memoryRepository.fulltextSearch(userId, combinedText, 10);
@@ -101,91 +140,87 @@ public class MemoryManager {
         log.info("Phase 2: LLM 抽取完成, candidates={}", candidates.size());
         if (candidates.isEmpty()) return;
 
-        // Phase 3: 批量 embedding
-        List<String> texts = candidates.stream().map(MemoryCandidate::content).toList();
-        List<float[]> embeddings = embeddingClient.embedBatch(texts);
-        boolean hasEmbeddings = embeddings.stream().anyMatch(e -> e.length > 0);
-
-        // Phase 4: Hash 去重  将第 1 步检索到的topK的前10就转换为set
+        // Phase 3+4: 先算 hash 去重，再对存活候选 embed（候选/hash/向量绑定，禁止下标错位）
         Set<String> existingHashes = existingMemories.stream()
                 .map(MemoryRecordEntity::getContentHash)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Set<String> batchHashes = new HashSet<>();
-        List<MemoryRecordEntity> toProcess = new ArrayList<>();
-
-        for (int i = 0; i < candidates.size(); i++) {
-            String text = texts.get(i);
-            String hash = DigestUtils.md5Hex(text);
-            // 判断是否重复 1. 已存在记忆 2. 批量处理中已存在
-            if (existingHashes.contains(hash) || batchHashes.contains(hash)) {
-                log.debug("跳过重复记忆(hash): {}", text.length() > 30 ? text.substring(0, 30) : text);
+        List<MemoryCandidate> survivors = new ArrayList<>();
+        Map<MemoryCandidate, String> hashByCandidate = new LinkedHashMap<>();
+        for (MemoryCandidate c : candidates) {
+            String hash = DigestUtils.md5Hex(c.content());
+            if (existingHashes.contains(hash) || !batchHashes.add(hash)) {
+                log.debug("跳过重复记忆(hash): {}", c.content().length() > 30 ? c.content().substring(0, 30) : c.content());
                 continue;
             }
-            batchHashes.add(hash);
-            MemoryRecordEntity record = MemoryRecordEntity.create(
-                    memoryRepository.nextId(), userId, candidates.get(i).type(), text, hash, sessionId);
-            toProcess.add(record);
+            survivors.add(c);
+            hashByCandidate.put(c, hash);
         }
 
-        if (toProcess.isEmpty()) return;
+        if (survivors.isEmpty()) return;
 
-        // Phase 5: UPDATE 判定 — 使用向量搜索 top-1 替代逐条 getVector
+        List<float[]> embs = embeddingClient.embedBatch(survivors.stream().map(MemoryCandidate::content).toList());
+        List<EmbeddedMemoryCandidate> embedded = new ArrayList<>(survivors.size());
+        for (int i = 0; i < survivors.size(); i++) {
+            MemoryCandidate c = survivors.get(i);
+            float[] e = i < embs.size() ? embs.get(i) : new float[0];
+            embedded.add(new EmbeddedMemoryCandidate(c, hashByCandidate.get(c), e));
+        }
+
+        // Phase 5: 身份化 UPDATE 判定（subject+predicate 优先，余弦回退），产出 ADD / UPDATE / DISPUTED 三路
         List<MemoryRecordEntity> toInsert = new ArrayList<>();
-        for (int i = 0; i < toProcess.size(); i++) {
-            MemoryRecordEntity record = toProcess.get(i);
-            float[] embedding = embeddings.size() > i ? embeddings.get(i) : new float[0];
-
-            if (hasEmbeddings && embedding.length > 0) {
-                Long updateTargetId = memoryExtractor.findUpdateTarget(embedding, userId);
-                if (updateTargetId != null) {
-                    MemoryRecordEntity existing = memoryRepository.queryById(updateTargetId);
-                    String oldContent = existing != null ? existing.getContent() : null;
-                    String newHash = DigestUtils.md5Hex(record.getContent());
-                    memoryRepository.updateContent(updateTargetId, record.getContent(), newHash, null);
-                    vectorStore.update(updateTargetId, embedding, record.getContent());
-                    memoryRepository.insertHistory(updateTargetId, oldContent, record.getContent(),
-                            "UPDATE", sessionId);
-                    // 清除画像缓存
-                    evictProfileCache(userId);
-                    log.debug("记忆 UPDATE: id={}", updateTargetId);
-                    continue;
+        List<MemoryPersistService.UpdatePlan> updates = new ArrayList<>();
+        List<MemoryRecordEntity> toDispute = new ArrayList<>();
+        for (EmbeddedMemoryCandidate ec : embedded) {
+            MemoryExtractor.OperationDecision decision = memoryExtractor.decideOperation(ec, userId);
+            switch (decision.action()) {
+                case "NOOP" -> log.debug("记忆幂等跳过(同 subject+predicate+value): {}", ec.content());
+                case "UPDATE" -> {
+                    MemoryRecordEntity target = decision.target();
+                    MemoryRecordEntity newRecord = buildRecord(ec, userId, sessionId, traceId);
+                    newRecord.setOperation("UPDATE");
+                    newRecord.setVersion(target.getVersion() != null ? target.getVersion() + 1 : 2);
+                    newRecord.setValidFrom(LocalDateTime.now());
+                    updates.add(new MemoryPersistService.UpdatePlan(target.getId(), target.getContent(), newRecord));
                 }
-            }
-            toInsert.add(record);
-        }
-
-        // Phase 6: 词形还原
-        for (MemoryRecordEntity record : toInsert) {
-            record.setContentTokenized(record.getContent());
-        }
-
-        // Phase 7: 批量持久化 — MySQL(vector_status=PENDING) + Qdrant + 标记SYNCED
-        log.info("Phase 7: 开始持久化, toInsert={}", toInsert.size());
-        for (int i = 0; i < toInsert.size(); i++) {
-            MemoryRecordEntity record = toInsert.get(i);
-            try {
-                // 优先存储 MySQL
-                memoryRepository.insert(record);
-                if (hasEmbeddings && embeddings.size() > i && embeddings.get(i).length > 0) {
-                    try {
-                        vectorStore.insert(record.getId(), userId, embeddings.get(i),
-                                record.getContent(), record.getContentHash());
-                        memoryRepository.updateVectorStatus(record.getId(), "SYNCED");
-                    } catch (Exception e) {
-                        log.warn("Qdrant 写入失败 id={}, 标记 PENDING: {}", record.getId(), e.getMessage());
-                        memoryRepository.updateVectorStatus(record.getId(), "PENDING");
-                    }
+                case "DELETE" -> {
+                    MemoryRecordEntity target = decision.target();
+                    updates.add(new MemoryPersistService.UpdatePlan(target.getId(), target.getContent(), null));
                 }
-                memoryRepository.insertHistory(record.getId(), null, record.getContent(),
-                        "ADD", sessionId);
-                // 清除缓存
-                evictProfileCache(userId);
-            } catch (Exception e) {
-                log.debug("记忆写入跳过: hash={} error={}", record.getContentHash(), e.getMessage());
+                case "DISPUTED" -> {
+                    MemoryRecordEntity target = decision.target();
+                    MemoryRecordEntity disputed = buildRecord(ec, userId, sessionId, traceId);
+                    disputed.setStatus(MemoryStatus.DISPUTED);
+                    disputed.setOperation("UPDATE");
+                    disputed.setVersion(target.getVersion() != null ? target.getVersion() + 1 : 2);
+                    disputed.setValidFrom(LocalDateTime.now());
+                    toDispute.add(disputed);
+                }
+                default -> toInsert.add(buildRecord(ec, userId, sessionId, traceId));
             }
         }
-        log.info("记忆抽取完成: userId={}, sessionId={}, inserted={}", userId, sessionId, toInsert.size());
+
+        // Phase 7: 事务内批量持久化（MySQL 权威 + vector_status=PENDING，向量由 MemoryVectorSyncJob 异步同步）
+        memoryPersistService.persistSurvivors(userId, sessionId, traceId, toInsert, updates, toDispute);
+        // persistSurvivors 是 @Transactional 边界，返回即事务已提交；此处 bump 处于「提交后」，Redis 失败不回滚 MySQL
+        bumpMemoryVersion(userId);
+        log.info("记忆抽取完成: userId={}, sessionId={}, traceId={}, insert={}, update={}, disputed={}",
+                userId, sessionId, traceId, toInsert.size(), updates.size(), toDispute.size());
+    }
+
+    /** 从候选构建带结构化字段的记忆实体（status=ACTIVE、version=1、valid_from=now，由 create 设置） */
+    private MemoryRecordEntity buildRecord(EmbeddedMemoryCandidate ec, Long userId, String sessionId, String traceId) {
+        MemoryRecordEntity record = MemoryRecordEntity.create(null, userId, ec.type(), ec.content(), ec.contentHash(), sessionId);
+        record.setContentTokenized(ec.content());
+        record.setSubject(PredicateNormalizer.normalize(ec.candidate().subject()));
+        record.setPredicate(PredicateNormalizer.normalize(ec.candidate().predicate()));
+        record.setValue(ec.candidate().value());
+        record.setAttributedTo(ec.candidate().attributedTo());
+        record.setConfidence(ec.candidate().confidence());
+        record.setEvidence(ec.candidate().evidence());
+        record.setTraceId(traceId);
+        return record;
     }
 
     /** 混合检索 */
@@ -195,7 +230,7 @@ public class MemoryManager {
 
     /** 为 Agent prompt 格式化记忆上下文 */
     public String retrieveContext(Long userId, String queryContext, int topK) {
-        if (!injectEnabled) {
+        if (memoryCircuitBreaker.isDegraded()) {
             return "";
         }
         if (queryContext == null || queryContext.isBlank()) {
@@ -206,7 +241,7 @@ public class MemoryManager {
 
     /** 为 Agent prompt 格式化记忆上下文（结构化查询） */
     public String retrieveContext(Long userId, MemoryRetrieveQueryVO query, int topK) {
-        if (!injectEnabled) {
+        if (memoryCircuitBreaker.isDegraded()) {
             return "";
         }
         if (query == null) {
@@ -224,18 +259,20 @@ public class MemoryManager {
     public void addDirect(Long userId, MemoryTypeVO type, String content) {
         String hash = DigestUtils.md5Hex(content);
         MemoryRecordEntity record = MemoryRecordEntity.create(
-                memoryRepository.nextId(), userId, type.getCode(), content, hash, "eval-seed");
+                null, userId, type.getCode(), content, hash, "eval-seed");
         record.setContentTokenized(content);
-        memoryRepository.insert(record);
+        Long id = memoryRepository.insert(record);
         try {
             float[] emb = embeddingClient.embed(content);
             if (emb.length > 0) {
-                vectorStore.insert(record.getId(), userId, emb, content, hash);
-                memoryRepository.updateVectorStatus(record.getId(), "SYNCED");
+                vectorStore.upsert(id, userId, emb, content, hash);
+                memoryRepository.updateVectorStatus(id, "SYNCED");
             }
         } catch (Exception e) {
-            log.warn("addDirect vector insert failed id={}", record.getId());
+            log.warn("addDirect vector upsert failed id={}, 标记 PENDING: {}", id, e.getMessage());
+            memoryRepository.updateVectorStatus(id, "PENDING");
         }
+        bumpMemoryVersion(userId);
     }
 
     /** 逻辑删除记忆 */
@@ -244,34 +281,32 @@ public class MemoryManager {
         memoryRepository.deleteById(memoryId);
         vectorStore.delete(memoryId);
         if (record != null) {
-            evictProfileCache(record.getUserId());
+            bumpMemoryVersion(record.getUserId());
         }
     }
 
-    /** 画像缓存清除（P2 正式接 Redis 后生效） */
-    private void evictProfileCache(Long userId) {
-        // P2 实现：redisTemplate.delete("memory:user:" + userId + ":profile")
+    /** 带用户归属校验的逻辑删除（IDOR 防护，消除 Controller 先查后删的 TOCTOU 窗口） */
+    public void delete(Long userId, Long memoryId) {
+        MemoryRecordEntity record = memoryRepository.queryById(memoryId);
+        if (record == null || !userId.equals(record.getUserId())) {
+            throw new MemoryAccessDeniedException("无权删除记忆: memoryId=" + memoryId);
+        }
+        memoryRepository.deleteById(memoryId);
+        vectorStore.delete(memoryId);
+        bumpMemoryVersion(userId);
     }
 
-    /** 补偿任务：每 30s 同步 PENDING 向量到 Qdrant */
-    @Scheduled(fixedDelay = 30_000)
-    public void syncPendingVectors() {
-        List<MemoryRecordEntity> pending = memoryRepository.selectPendingVectors();
-        if (pending.isEmpty()) return;
-        log.info("补偿任务: 发现 {} 条 PENDING 向量待同步", pending.size());
-        for (MemoryRecordEntity p : pending) {
-            try {
-                float[] emb = embeddingClient.embed(p.getContent());
-                if (emb.length > 0) {
-                    vectorStore.insert(p.getId(), p.getUserId(), emb, p.getContent(), p.getContentHash());
-                    memoryRepository.updateVectorStatus(p.getId(), "SYNCED");
-                }
-            } catch (Exception e) {
-                log.warn("补偿同步失败 id={}, retry={}: {}", p.getId(), p.getAccessCount(), e.getMessage());
-                if (p.getAccessCount() != null && p.getAccessCount() >= 3) {
-                    memoryRepository.updateVectorStatus(p.getId(), "FAILED");
-                }
-            }
+    /**
+     * 递增用户记忆版本（P2-5 缓存失效）。
+     *
+     * <p>搜索/画像缓存 key 拼接此版本，写入后 INCR 即令旧缓存 key 失配自然失效。
+     * Redis 异常仅影响缓存失效，不回滚已落库数据，故内部吞异常。</p>
+     */
+    private void bumpMemoryVersion(Long userId) {
+        try {
+            redisTemplate.opsForValue().increment("memory:user:" + userId + ":version");
+        } catch (Exception e) {
+            log.warn("memoryVersion INCR 失败 userId={}: {}", userId, e.getMessage());
         }
     }
 
@@ -291,7 +326,7 @@ public class MemoryManager {
                 try {
                     float[] emb = embeddingClient.embed(r.getContent());
                     if (emb.length > 0) {
-                        vectorStore.insert(r.getId(), r.getUserId(), emb, r.getContent(), r.getContentHash());
+                        vectorStore.upsert(r.getId(), r.getUserId(), emb, r.getContent(), r.getContentHash());
                         memoryRepository.updateVectorStatus(r.getId(), "SYNCED");
                         migrated++;
                         log.debug("迁移成功: id={}", r.getId());

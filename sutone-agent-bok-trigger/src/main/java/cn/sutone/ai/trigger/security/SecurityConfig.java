@@ -37,7 +37,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         .requestMatchers("/api/v1/query_ai_agent_config_list").permitAll()
                         .requestMatchers("/uploads/**").permitAll()
-                        .requestMatchers("/api/v1/memory/migrate/all").permitAll()
+                        // 全量迁移为高危运维操作：禁止匿名访问。
+                        // 当前系统无角色体系，先以 authenticated() 兜底，仅登录用户可调用；
+                        // 后续如引入角色体系，应改为 hasRole("ADMIN")，或将该操作迁移为内部定时/运维脚本（不暴露 HTTP）。
+                        .requestMatchers("/api/v1/memory/migrate/all").authenticated()
                         .requestMatchers("/api/v1/memory/**").authenticated()
                         .requestMatchers("/api/v1/writing/chat/**").authenticated()
                         .anyRequest().authenticated()

@@ -6,9 +6,8 @@ import java.util.List;
 
 public interface IMemoryVectorStore {
 
-    void insert(Long memoryId, Long userId, float[] embedding, String content, String contentHash);
-
-    void update(Long memoryId, float[] newEmbedding, String newContent);
+    /** 幂等 upsert（新增与更新统一入口，Qdrant PUT 幂等） */
+    void upsert(Long memoryId, Long userId, float[] embedding, String content, String contentHash);
 
     List<ScoredMemory> search(Long userId, float[] queryEmbedding, int topK);
 

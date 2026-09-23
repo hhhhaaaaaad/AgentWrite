@@ -62,19 +62,10 @@ public class SimpleMemoryVectorStore implements IMemoryVectorStore {
         }
     }
 
-    /** 插入一条记忆的向量 */
+    /** 幂等 upsert（新增与更新统一入口） */
     @Override
-    public void insert(Long memoryId, Long userId, float[] embedding, String content, String contentHash) {
+    public void upsert(Long memoryId, Long userId, float[] embedding, String content, String contentHash) {
         store.put(memoryId, new VectorEntry(userId, embedding, content, contentHash));
-    }
-
-    /** 更新已有记忆的向量和内容 */
-    @Override
-    public void update(Long memoryId, float[] newEmbedding, String newContent) {
-        VectorEntry existing = store.get(memoryId);
-        if (existing != null) {
-            store.put(memoryId, new VectorEntry(existing.userId(), newEmbedding, newContent, existing.contentHash()));
-        }
     }
 
     /** 语义搜索：返回 cosine 相似度最高的 topK 条记忆 */

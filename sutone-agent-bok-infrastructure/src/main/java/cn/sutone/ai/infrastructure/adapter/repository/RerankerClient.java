@@ -8,9 +8,11 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,9 +28,19 @@ public class RerankerClient implements IRerankerClient {
     @Resource
     private MemoryProperties memoryProperties;
 
-    private final RestTemplate rest = new RestTemplate();
+    private RestTemplate rest;
     private final AtomicInteger failureCount = new AtomicInteger(0);
     private volatile long circuitOpenUntil = 0;
+
+    /** P2-4: 构造带 connect/read 超时的 RestTemplate（读配置 memory.reranker.timeout） */
+    @PostConstruct
+    public void init() {
+        int timeout = memoryProperties.getReranker().getTimeout();
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeout);
+        factory.setReadTimeout(timeout);
+        this.rest = new RestTemplate(factory);
+    }
 
     /**
      * 精排：粗排 top-K → Cross-Encoder → 精排 top-N

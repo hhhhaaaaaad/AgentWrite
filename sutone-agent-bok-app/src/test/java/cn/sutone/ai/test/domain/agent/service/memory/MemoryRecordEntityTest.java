@@ -1,10 +1,13 @@
 package cn.sutone.ai.test.domain.agent.service.memory;
 
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.valobj.MemoryStatus;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,6 +66,48 @@ class MemoryRecordEntityTest {
             assertEquals(42L, record.getId());
             assertEquals(0.8, record.getImportance(), 0.001);
             assertEquals(5, record.getAccessCount());
+        }
+
+        @Test
+        @DisplayName("Builder 可设置结构化与生命周期新字段")
+        void shouldSetStructuredFieldsViaBuilder() {
+            LocalDateTime expire = LocalDateTime.of(2026, 1, 1, 0, 0);
+            MemoryRecordEntity record = MemoryRecordEntity.builder()
+                    .id(1L)
+                    .userId(100L)
+                    .type(MemoryTypeVO.FACT)
+                    .attributedTo("user")
+                    .confidence(0.9)
+                    .expireTime(expire)
+                    .subject("user")
+                    .predicate("tech_stack")
+                    .value("Java 17")
+                    .evidence("原文")
+                    .traceId("mem-123")
+                    .operation("ADD")
+                    .version(1)
+                    .status(MemoryStatus.ACTIVE)
+                    .validFrom(expire)
+                    .validTo(expire)
+                    .nextRetryAt(expire)
+                    .lastError("err")
+                    .build();
+
+            assertEquals("user", record.getAttributedTo());
+            assertEquals(0.9, record.getConfidence(), 0.001);
+            assertEquals(expire, record.getExpireTime());
+            assertEquals("user", record.getSubject());
+            assertEquals("tech_stack", record.getPredicate());
+            assertEquals("Java 17", record.getValue());
+            assertEquals("原文", record.getEvidence());
+            assertEquals("mem-123", record.getTraceId());
+            assertEquals("ADD", record.getOperation());
+            assertEquals(1, record.getVersion());
+            assertEquals(MemoryStatus.ACTIVE, record.getStatus());
+            assertEquals(expire, record.getValidFrom());
+            assertEquals(expire, record.getValidTo());
+            assertEquals(expire, record.getNextRetryAt());
+            assertEquals("err", record.getLastError());
         }
     }
 }

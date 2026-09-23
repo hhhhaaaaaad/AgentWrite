@@ -1,9 +1,13 @@
 package cn.sutone.ai.infrastructure.adapter.repository;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
+import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.exception.MemoryVectorStoreException;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
+import cn.sutone.ai.infrastructure.metrics.MemoryMetrics;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -15,6 +19,7 @@ import org.springframework.web.client.RestTemplate;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.time.LocalDateTime;
 import java.util.*;
 
 /**
@@ -31,6 +36,12 @@ public class QdrantVectorStore implements IMemoryVectorStore {
 
     @Resource
     private IMemoryEmbeddingClient embeddingClient;
+
+    @Resource
+    private IMemoryRepository memoryRepository;
+
+    @Resource
+    private MemoryMetrics memoryMetrics;
 
     private final RestTemplate rest = new RestTemplate();
 
@@ -87,13 +98,28 @@ public class QdrantVectorStore implements IMemoryVectorStore {
     }
 
     @Override
-    public void insert(Long memoryId, Long userId, float[] embedding, String content, String contentHash) {
+    public void upsert(Long memoryId, Long userId, float[] embedding, String content, String contentHash) {
         try {
             String url = baseUrl + "/collections/" + collectionName + "/points";
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("user_id", userId);
             payload.put("content", content);
             payload.put("content_hash", contentHash);
+
+            // P2-1: payload 作为「召回加速缓存」，补充权威元数据（MySQL 仍是权威，此处仅加速粗排 recency/importance）
+            MemoryRecordEntity meta = memoryRepository.queryById(memoryId);
+            if (meta != null) {
+                putIfNotNull(payload, "type", meta.getType() != null ? meta.getType().getCode() : null);
+                putIfNotNull(payload, "importance", meta.getImportance());
+                putIfNotNull(payload, "last_accessed_at", meta.getLastAccessedAt() != null ? meta.getLastAccessedAt().toString() : null);
+                putIfNotNull(payload, "expire_time", meta.getExpireTime() != null ? meta.getExpireTime().toString() : null);
+                putIfNotNull(payload, "attributed_to", meta.getAttributedTo());
+                putIfNotNull(payload, "subject", meta.getSubject());
+                putIfNotNull(payload, "predicate", meta.getPredicate());
+                putIfNotNull(payload, "value", meta.getValue());
+                putIfNotNull(payload, "confidence", meta.getConfidence());
+                putIfNotNull(payload, "version", meta.getVersion());
+            }
 
             Map<String, Object> point = Map.of(
                     "id", memoryId,
@@ -106,20 +132,29 @@ public class QdrantVectorStore implements IMemoryVectorStore {
             headers.setContentType(MediaType.APPLICATION_JSON);
             rest.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
         } catch (Exception e) {
-            log.error("Qdrant insert failed id={}: {}", memoryId, e.getMessage());
+            log.error("Qdrant upsert failed id={}: {}", memoryId, e.getMessage());
+            memoryMetrics.incrementQdrantFailure("upsert");
+            throw new MemoryVectorStoreException("qdrant upsert failed id=" + memoryId, e);
         }
     }
 
-    @Override
-    public void update(Long memoryId, float[] newEmbedding, String newContent) {
-        // 先删除再插入（Qdrant 不支持原地 update vector）
-        delete(memoryId);
-        // 需要 userId，从 payload 中无法直接获取，所以需要通过 search 或依赖上层传入
+    /** 仅写入非 null 值，避免向 Qdrant payload 传入 null 字段 */
+    private static void putIfNotNull(Map<String, Object> payload, String key, Object value) {
+        if (value != null) {
+            payload.put(key, value);
+        }
     }
 
-    public void upsert(Long memoryId, Long userId, float[] embedding, String content, String contentHash) {
-        // 和 insert 相同（Qdrant upsert = put）
-        insert(memoryId, userId, embedding, content, contentHash);
+    /** 解析 ISO-8601 时间字符串，失败返回 null */
+    private static LocalDateTime parseDateTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(value);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
@@ -152,11 +187,15 @@ public class QdrantVectorStore implements IMemoryVectorStore {
                 JSONObject payload = r.getJSONObject("payload");
                 String content = payload != null ? payload.getString("content") : "";
                 String contentHash = payload != null ? payload.getString("content_hash") : "";
-                list.add(new ScoredMemory(id, content, score, null, null, contentHash));
+                // P2-1: 回填 importance / lastAccessedAt（此前硬编码 null，导致 recency/importance 粗排失效）
+                Double importance = payload != null ? payload.getDouble("importance") : null;
+                LocalDateTime lastAccessedAt = parseDateTime(payload != null ? payload.getString("last_accessed_at") : null);
+                list.add(new ScoredMemory(id, content, score, importance, lastAccessedAt, contentHash));
             }
             return list;
         } catch (Exception e) {
             log.error("Qdrant search failed userId={}: {}", userId, e.getMessage());
+            memoryMetrics.incrementQdrantFailure("search");
             return Collections.emptyList();
         }
     }
@@ -170,7 +209,9 @@ public class QdrantVectorStore implements IMemoryVectorStore {
             headers.setContentType(MediaType.APPLICATION_JSON);
             rest.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
         } catch (Exception e) {
-            log.warn("Qdrant delete failed id={}: {}", memoryId, e.getMessage());
+            log.error("Qdrant delete failed id={}: {}", memoryId, e.getMessage());
+            memoryMetrics.incrementQdrantFailure("delete");
+            throw new MemoryVectorStoreException("qdrant delete failed id=" + memoryId, e);
         }
     }
 
