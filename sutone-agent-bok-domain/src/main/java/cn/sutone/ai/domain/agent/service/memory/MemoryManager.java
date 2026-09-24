@@ -14,6 +14,8 @@ import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.service.memory.circuit.MemoryCircuitBreaker;
 import cn.sutone.ai.domain.agent.service.memory.trace.MemoryTraceId;
+import cn.sutone.ai.domain.content.adapter.repository.IArticleRepository;
+import cn.sutone.ai.domain.content.model.entity.ArticleEntity;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -61,6 +63,9 @@ public class MemoryManager {
     @Resource
     private MemoryCircuitBreaker memoryCircuitBreaker;
 
+    @Resource
+    private IArticleRepository articleRepository;
+
     /**
      * 异步写入记忆 — V3 完整 Pipeline（8 阶段）
      * 触发时机：用户保存文章后
@@ -68,9 +73,20 @@ public class MemoryManager {
     @Async("memoryExecutor")
     public void addAsync(Long userId, Long agentId, String sessionId,
                          List<Map<String, String>> messages) {
+        addAsync(userId, agentId, sessionId, null, messages);
+    }
+
+    /**
+     * 异步写入记忆（带来源文章）— 落库时快照来源文章标题与摘要，注入时建立跨文章关联
+     *
+     * @param articleId 来源文章 id，为空则不快照来源（3 字段保持 null）
+     */
+    @Async("memoryExecutor")
+    public void addAsync(Long userId, Long agentId, String sessionId, Long articleId,
+                         List<Map<String, String>> messages) {
         String traceId = MemoryTraceId.next();  // P0 埋点：本线程 MDC 关联 trace_id
         try {
-            this.add(userId, agentId, sessionId, messages, traceId);
+            this.add(userId, agentId, sessionId, articleId, messages, traceId);
         } catch (Exception e) {
             log.error("记忆抽取失败 userId={} sessionId={}: {}", userId, sessionId, e.getMessage(), e);
         } finally {
@@ -79,17 +95,17 @@ public class MemoryManager {
     }
 
     /** V3 Pipeline 主流程（计时包装，端到端抽取存储耗时记 pipeline.duration） */
-    private void add(Long userId, Long agentId, String sessionId,
+    private void add(Long userId, Long agentId, String sessionId, Long articleId,
                      List<Map<String, String>> messages, String traceId) {
         long start = System.nanoTime();
         try {
-            doAdd(userId, agentId, sessionId, messages, traceId);
+            doAdd(userId, agentId, sessionId, articleId, messages, traceId);
         } finally {
             metrics.recordPipelineDuration(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         }
     }
 
-    private void doAdd(Long userId, Long agentId, String sessionId,
+    private void doAdd(Long userId, Long agentId, String sessionId, Long articleId,
                        List<Map<String, String>> messages, String traceId) {
         if (messages == null || messages.isEmpty()) {
             log.info("记忆抽取跳过: 无消息内容");
@@ -97,6 +113,17 @@ public class MemoryManager {
         }
 
         log.info("记忆抽取开始: userId={}, sessionId={}, msgCount={}", userId, sessionId, messages.size());
+
+        // Phase 0.5: 来源文章快照（articleId 非空时查询一次，标题 + 截取原文前 100 字作摘要）
+        String sourceArticleTitle = null;
+        String sourceArticleSummary = null;
+        if (articleId != null) {
+            ArticleEntity article = resolveArticle(articleId);
+            if (article != null) {
+                sourceArticleTitle = article.getTitle();
+                sourceArticleSummary = truncateSummary(article.getContentMd(), 100);
+            }
+        }
 
         // Phase 0: context collection — get last 15 from chat_message (for LLM context)
         List<String> historyMessages = memoryRepository.getLastMessages(sessionId, 15);
@@ -178,7 +205,7 @@ public class MemoryManager {
                 case "NOOP" -> log.debug("记忆幂等跳过(同 subject+predicate+value): {}", ec.content());
                 case "UPDATE" -> {
                     MemoryRecordEntity target = decision.target();
-                    MemoryRecordEntity newRecord = buildRecord(ec, userId, sessionId, traceId);
+                    MemoryRecordEntity newRecord = buildRecord(ec, userId, sessionId, traceId, articleId, sourceArticleTitle, sourceArticleSummary);
                     newRecord.setOperation("UPDATE");
                     newRecord.setVersion(target.getVersion() != null ? target.getVersion() + 1 : 2);
                     newRecord.setValidFrom(LocalDateTime.now());
@@ -190,14 +217,14 @@ public class MemoryManager {
                 }
                 case "DISPUTED" -> {
                     MemoryRecordEntity target = decision.target();
-                    MemoryRecordEntity disputed = buildRecord(ec, userId, sessionId, traceId);
+                    MemoryRecordEntity disputed = buildRecord(ec, userId, sessionId, traceId, articleId, sourceArticleTitle, sourceArticleSummary);
                     disputed.setStatus(MemoryStatus.DISPUTED);
                     disputed.setOperation("UPDATE");
                     disputed.setVersion(target.getVersion() != null ? target.getVersion() + 1 : 2);
                     disputed.setValidFrom(LocalDateTime.now());
                     toDispute.add(disputed);
                 }
-                default -> toInsert.add(buildRecord(ec, userId, sessionId, traceId));
+                default -> toInsert.add(buildRecord(ec, userId, sessionId, traceId, articleId, sourceArticleTitle, sourceArticleSummary));
             }
         }
 
@@ -210,7 +237,8 @@ public class MemoryManager {
     }
 
     /** 从候选构建带结构化字段的记忆实体（status=ACTIVE、version=1、valid_from=now，由 create 设置） */
-    private MemoryRecordEntity buildRecord(EmbeddedMemoryCandidate ec, Long userId, String sessionId, String traceId) {
+    private MemoryRecordEntity buildRecord(EmbeddedMemoryCandidate ec, Long userId, String sessionId, String traceId,
+                                           Long articleId, String sourceArticleTitle, String sourceArticleSummary) {
         MemoryRecordEntity record = MemoryRecordEntity.create(null, userId, ec.type(), ec.content(), ec.contentHash(), sessionId);
         record.setContentTokenized(ec.content());
         record.setSubject(PredicateNormalizer.normalize(ec.candidate().subject()));
@@ -220,6 +248,9 @@ public class MemoryManager {
         record.setConfidence(ec.candidate().confidence());
         record.setEvidence(ec.candidate().evidence());
         record.setTraceId(traceId);
+        record.setSourceArticleId(articleId);
+        record.setSourceArticleTitle(sourceArticleTitle);
+        record.setSourceArticleSummary(sourceArticleSummary);
         return record;
     }
 
@@ -362,5 +393,27 @@ public class MemoryManager {
     /** 记忆总数 */
     public int count(Long userId) {
         return memoryRepository.countByUserId(userId);
+    }
+
+    /** 查询来源文章（articleId 为空或查询失败返回 null，不影响记忆落库） */
+    private ArticleEntity resolveArticle(Long articleId) {
+        if (articleId == null) {
+            return null;
+        }
+        try {
+            return articleRepository.queryArticleById(articleId);
+        } catch (Exception e) {
+            log.warn("查询来源文章失败 articleId={}: {}", articleId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 截取原文前 {@code maxLen} 字（去换行）作为来源一句话摘要 */
+    private String truncateSummary(String contentMd, int maxLen) {
+        if (contentMd == null || contentMd.isBlank()) {
+            return null;
+        }
+        String normalized = contentMd.replaceAll("[\\r\\n]+", " ").trim();
+        return normalized.length() > maxLen ? normalized.substring(0, maxLen) : normalized;
     }
 }

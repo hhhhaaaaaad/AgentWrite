@@ -60,4 +60,10 @@ public class MemoryRecordPO {
     private LocalDateTime nextRetryAt;
     /** 向量同步最后错误 */
     private String lastError;
+    /** 来源文章 id（该记忆从哪篇文章抽取） */
+    private Long sourceArticleId;
+    /** 来源文章标题（快照） */
+    private String sourceArticleTitle;
+    /** 来源文章一句话摘要（截取原文前 100 字，快照） */
+    private String sourceArticleSummary;
 }

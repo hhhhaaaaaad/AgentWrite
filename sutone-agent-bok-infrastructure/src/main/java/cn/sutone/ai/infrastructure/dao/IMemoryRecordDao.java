@@ -13,11 +13,13 @@ public interface IMemoryRecordDao {
             INSERT INTO memory_record(user_id, type, content, content_hash, content_tokenized,
                 source_session_id, importance, access_count, is_deleted, vector_status,
                 attributed_to, confidence, expire_time, subject, predicate, `value`, evidence,
-                trace_id, operation, version, status, valid_from, valid_to)
+                trace_id, operation, version, status, valid_from, valid_to,
+                source_article_id, source_article_title, source_article_summary)
             VALUES(#{userId}, #{type}, #{content}, #{contentHash}, #{contentTokenized},
                 #{sourceSessionId}, #{importance}, #{accessCount}, #{isDeleted}, 'PENDING',
                 #{attributedTo}, #{confidence}, #{expireTime}, #{subject}, #{predicate}, #{value}, #{evidence},
-                #{traceId}, #{operation}, #{version}, #{status}, #{validFrom}, #{validTo})
+                #{traceId}, #{operation}, #{version}, #{status}, #{validFrom}, #{validTo},
+                #{sourceArticleId}, #{sourceArticleTitle}, #{sourceArticleSummary})
             """)
     @Options(useGeneratedKeys = true, keyProperty = "id", keyColumn = "id")
     int insert(MemoryRecordPO po);
@@ -33,7 +35,7 @@ public interface IMemoryRecordDao {
                       @Param("contentHash") String contentHash, @Param("contentTokenized") String contentTokenized);
 
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE id = #{id} AND is_deleted = 0
             """)
@@ -41,7 +43,7 @@ public interface IMemoryRecordDao {
 
     @Select("""
             <script>
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE id IN
             <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
@@ -51,7 +53,7 @@ public interface IMemoryRecordDao {
     List<MemoryRecordPO> selectByIds(@Param("ids") List<Long> ids);
 
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE user_id = #{userId} AND is_deleted = 0
             ORDER BY create_time DESC
@@ -66,7 +68,7 @@ public interface IMemoryRecordDao {
     int countByUserId(@Param("userId") Long userId);
 
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE is_deleted = 0
             """)
@@ -106,7 +108,7 @@ public interface IMemoryRecordDao {
                    create_time, update_time, is_deleted, vector_status,
                    IFNULL(retry_count, 0) AS retry_count, attributed_to, confidence,
                    expire_time, subject, predicate, `value`, evidence, trace_id,
-                   operation, version, status, valid_from, valid_to, next_retry_at, last_error
+                   operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE vector_status = 'PENDING' AND is_deleted = 0
             ORDER BY create_time ASC
@@ -154,7 +156,7 @@ public interface IMemoryRecordDao {
 
     /** P1-4: 按 (user_id, subject, predicate, status='ACTIVE') 精确查唯一 ACTIVE 版本 */
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE user_id = #{userId} AND subject = #{subject} AND predicate = #{predicate}
               AND status = 'ACTIVE' AND is_deleted = 0
@@ -191,7 +193,7 @@ public interface IMemoryRecordDao {
 
     /** P1-4: 查询待删旧向量 */
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE vector_status = 'DELETE_PENDING'
             """)
@@ -203,7 +205,7 @@ public interface IMemoryRecordDao {
 
     /** P3 治理: 查询全部 ACTIVE 记忆（供重复聚类按 user_id+type 分组） */
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
             """)
@@ -211,7 +213,7 @@ public interface IMemoryRecordDao {
 
     /** P3 治理: 查询含 subject+predicate 的 ACTIVE 记忆（供事实一致性巡检聚合） */
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
               AND subject IS NOT NULL AND predicate IS NOT NULL
@@ -220,7 +222,7 @@ public interface IMemoryRecordDao {
 
     /** P3 治理: 扫描过期且 {@code last_accessed_at} 早于阈值时间的 ACTIVE 记忆（供软归档） */
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
               AND expire_time IS NOT NULL AND expire_time < NOW()
@@ -230,7 +232,7 @@ public interface IMemoryRecordDao {
 
     /** P3 治理: 抽样 confidence 落在 [min,max] 灰色地带的 ACTIVE 记忆（供幻觉抽检） */
     @Select("""
-            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
               AND confidence >= #{minConfidence} AND confidence <= #{maxConfidence}

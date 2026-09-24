@@ -178,7 +178,8 @@ public class MemoryRetriever {
         List<MemoryItem> scored = hits.stream()
                 .map(h -> new MemoryItem(h.getId(), h.getContent(),
                         finalScore(fused.get(h.getId()), h, profileIds.contains(h.getId())),
-                        h.getImportance(), h.getType(), h.getConfidence()))
+                        h.getImportance(), h.getType(), h.getConfidence(),
+                        h.getSourceArticleTitle(), h.getSourceArticleSummary()))
                 .sorted(Comparator.comparingDouble(MemoryItem::score).reversed())
                 .collect(Collectors.toList());
 
@@ -340,7 +341,9 @@ public class MemoryRetriever {
                     return new MemoryItem(r.id(), r.content(), r.score(),
                             original != null ? original.importance() : r.importance(),
                             original != null ? original.type() : null,
-                            original != null ? original.confidence() : null);
+                            original != null ? original.confidence() : null,
+                            original != null ? original.sourceArticleTitle() : null,
+                            original != null ? original.sourceArticleSummary() : null);
                 })
                 .collect(Collectors.toList());
     }
@@ -473,6 +476,12 @@ public class MemoryRetriever {
             if (conf != null) {
                 sb.append("（置信度: ").append(conf).append("）");
             }
+            if (m.sourceArticleTitle() != null && !m.sourceArticleTitle().isBlank()) {
+                sb.append("\n  ↳ 来源：《").append(m.sourceArticleTitle()).append("》");
+                if (m.sourceArticleSummary() != null && !m.sourceArticleSummary().isBlank()) {
+                    sb.append("——").append(m.sourceArticleSummary());
+                }
+            }
             sb.append("\n");
         }
         sb.append("</memory_context>");
@@ -506,9 +515,10 @@ public class MemoryRetriever {
 
     /** 对外暴露的记忆检索结果 */
     public record MemoryItem(Long id, String content, double score, Double importance,
-                             MemoryTypeVO type, Double confidence) {
+                             MemoryTypeVO type, Double confidence,
+                             String sourceArticleTitle, String sourceArticleSummary) {
         public MemoryItem(Long id, String content, double score, Double importance) {
-            this(id, content, score, importance, null, null);
+            this(id, content, score, importance, null, null, null, null);
         }
     }
 

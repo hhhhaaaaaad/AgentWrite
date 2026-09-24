@@ -267,6 +267,9 @@ public class MemoryRepository implements IMemoryRepository {
                 .validTo(entity.getValidTo())
                 .nextRetryAt(entity.getNextRetryAt())
                 .lastError(entity.getLastError())
+                .sourceArticleId(entity.getSourceArticleId())
+                .sourceArticleTitle(entity.getSourceArticleTitle())
+                .sourceArticleSummary(entity.getSourceArticleSummary())
                 .build();
     }
 
@@ -305,6 +308,9 @@ public class MemoryRepository implements IMemoryRepository {
                 .validTo(po.getValidTo())
                 .nextRetryAt(po.getNextRetryAt())
                 .lastError(po.getLastError())
+                .sourceArticleId(po.getSourceArticleId())
+                .sourceArticleTitle(po.getSourceArticleTitle())
+                .sourceArticleSummary(po.getSourceArticleSummary())
                 .build();
     }
 }
