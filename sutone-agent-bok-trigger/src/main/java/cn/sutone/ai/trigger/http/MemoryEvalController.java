@@ -406,12 +406,18 @@ public class MemoryEvalController {
 
     /**
      * 治理样本导出：四类治理任务的输入候选快照（只读），供平台与 ground truth 对账。
+     *
+     * <p><b>evalUserId 必须传给服务层。</b>此前这里只做了 {@code validateEvalUserId}
+     * （校验落在命名空间区间内），却没有把它传下去——服务层的样本查询当时是全局的，
+     * 于是「命名空间校验」形同虚设，接口实际返回全库所有用户的记忆内容。
+     * 校验一个值却不使用它，比不校验更危险：它让人以为边界已经守住了。</p>
      */
     @PostMapping("/governance/samples")
     public Response<EvalGovernanceSamplesResponseDTO> governanceSamples(@RequestBody EvalGovernanceSamplesRequestDTO request) {
         try {
             validateEvalUserId(request.getEvalUserId());
-            MemoryGovernanceComputeService.GovernanceSamples samples = governanceComputeService.samples();
+            MemoryGovernanceComputeService.GovernanceSamples samples =
+                    governanceComputeService.samples(request.getEvalUserId());
             return Response.<EvalGovernanceSamplesResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())
                     .info(ResponseCode.SUCCESS.getInfo())

@@ -88,15 +88,16 @@ public interface IMemoryRepository {
     /** P3 治理: 软标记生命周期状态（先软标记后硬化，只改 status 不物理删除） */
     void updateStatus(Long id, MemoryStatus status);
 
-    /** P3 治理: 查询全部 ACTIVE 记忆（重复聚类按 user_id+type 分组） */
-    List<MemoryRecordEntity> selectActiveForDuplicateScan();
+    /** P3 治理: 查询 ACTIVE 记忆（重复聚类按 user_id+type 分组）。{@code userId} 为空表示全库。 */
+    List<MemoryRecordEntity> selectActiveForDuplicateScan(Long userId);
 
-    /** P3 治理: 查询含 subject+predicate 的 ACTIVE 记忆（事实一致性巡检聚合） */
-    List<MemoryRecordEntity> selectActiveForConsistencyScan();
+    /** P3 治理: 查询含 subject+predicate 的 ACTIVE 记忆（事实一致性巡检聚合）。{@code userId} 为空表示全库。 */
+    List<MemoryRecordEntity> selectActiveForConsistencyScan(Long userId);
 
-    /** P3 治理: 扫描过期且长期未激活的 ACTIVE 记忆（软归档） */
-    List<MemoryRecordEntity> selectExpiredForArchive(LocalDateTime before);
+    /** P3 治理: 扫描过期且长期未激活的 ACTIVE 记忆（软归档）。{@code userId} 为空表示全库。 */
+    List<MemoryRecordEntity> selectExpiredForArchive(LocalDateTime before, Long userId);
 
-    /** P3 治理: 抽样 confidence 灰色地带的 ACTIVE 记忆（幻觉抽检） */
-    List<MemoryRecordEntity> selectSampleForHallucinationCheck(double minConfidence, double maxConfidence, int limit);
+    /** P3 治理: 抽样 confidence 灰色地带的 ACTIVE 记忆（幻觉抽检）。{@code userId} 为空表示全库。 */
+    List<MemoryRecordEntity> selectSampleForHallucinationCheck(
+            double minConfidence, double maxConfidence, int limit, Long userId);
 }

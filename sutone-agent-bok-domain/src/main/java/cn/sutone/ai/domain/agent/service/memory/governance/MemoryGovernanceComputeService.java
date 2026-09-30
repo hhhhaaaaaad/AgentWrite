@@ -89,7 +89,9 @@ public class MemoryGovernanceComputeService {
      * 产出「非代表行 → MERGE_PENDING」决策，合并目标为代表行。
      */
     public List<GovernanceDecision> computeDuplicates() {
-        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForDuplicateScan();
+        // userId 传 null = 扫全库：治理 job 本就要处理所有用户。与 samples() 的
+        // 强制 userId 形成对照——那里是**对外导出内容**，这里是**内部计算决策**。
+        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForDuplicateScan(null);
         if (actives == null || actives.isEmpty()) {
             return List.of();
         }
@@ -117,7 +119,8 @@ public class MemoryGovernanceComputeService {
      * 同 predicate 异 value 的互斥对 → 保留最早创建行，其余产出 DISPUTED 决策。
      */
     public List<GovernanceDecision> computeConsistency() {
-        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForConsistencyScan();
+        // userId 传 null = 扫全库，同 computeDuplicates 的理由。
+        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForConsistencyScan(null);
         if (actives == null || actives.isEmpty()) {
             return List.of();
         }
@@ -159,7 +162,7 @@ public class MemoryGovernanceComputeService {
      */
     public List<GovernanceDecision> computeExpired() {
         LocalDateTime inactiveBefore = LocalDateTime.now().minusDays(EXPIRED_INACTIVE_DAYS);
-        List<MemoryRecordEntity> expired = memoryRepository.selectExpiredForArchive(inactiveBefore);
+        List<MemoryRecordEntity> expired = memoryRepository.selectExpiredForArchive(inactiveBefore, null);
         if (expired == null || expired.isEmpty()) {
             return List.of();
         }
@@ -177,7 +180,8 @@ public class MemoryGovernanceComputeService {
      */
     public List<GovernanceDecision> computeHallucination() {
         List<MemoryRecordEntity> samples = memoryRepository.selectSampleForHallucinationCheck(
-                HALLUCINATION_MIN_CONFIDENCE, HALLUCINATION_MAX_CONFIDENCE, HALLUCINATION_SAMPLE_LIMIT);
+                HALLUCINATION_MIN_CONFIDENCE, HALLUCINATION_MAX_CONFIDENCE,
+                HALLUCINATION_SAMPLE_LIMIT, null);
         if (samples == null || samples.isEmpty()) {
             return List.of();
         }
@@ -195,14 +199,30 @@ public class MemoryGovernanceComputeService {
                 "evidence 不支撑断言（疑似幻觉）", items));
     }
 
-    /** 导出四类治理任务的输入候选样本（只读，供评测平台对账） */
-    public GovernanceSamples samples() {
-        List<MemoryRecordEntity> duplicateCandidates = memoryRepository.selectActiveForDuplicateScan();
-        List<MemoryRecordEntity> consistencyCandidates = memoryRepository.selectActiveForConsistencyScan();
+    /**
+     * 导出四类治理任务的输入候选样本（只读，供评测平台对账）。
+     *
+     * <p><b>{@code userId} 必填，不接受 null。</b>这些桶里带记忆的 {@code content}，
+     * 而调用方是评测端点（{@code /api/v1/eval/governance/samples}）——评测是按命名空间
+     * 隔离的，不按用户过滤就等于把一个命名空间的记忆内容暴露给所有命名空间。</p>
+     *
+     * <p>刻意**不提供无参重载**：这个能力一旦存在，就会有人图省事调用它，
+     * 而「忘了传 userId」在编译期没有任何提示、在运行期也不报错——正是本次修复的缺陷形态。
+     * 想让编译器替你拦住这类错误，就不能留那条更省事的路。</p>
+     */
+    public GovernanceSamples samples(Long userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException(
+                    "samples 必须指定 userId：治理样本包含记忆内容，不能跨命名空间导出");
+        }
+        List<MemoryRecordEntity> duplicateCandidates = memoryRepository.selectActiveForDuplicateScan(userId);
+        List<MemoryRecordEntity> consistencyCandidates = memoryRepository.selectActiveForConsistencyScan(userId);
         LocalDateTime inactiveBefore = LocalDateTime.now().minusDays(EXPIRED_INACTIVE_DAYS);
-        List<MemoryRecordEntity> expiredCandidates = memoryRepository.selectExpiredForArchive(inactiveBefore);
+        List<MemoryRecordEntity> expiredCandidates =
+                memoryRepository.selectExpiredForArchive(inactiveBefore, userId);
         List<MemoryRecordEntity> hallucinationCandidates = memoryRepository.selectSampleForHallucinationCheck(
-                HALLUCINATION_MIN_CONFIDENCE, HALLUCINATION_MAX_CONFIDENCE, HALLUCINATION_SAMPLE_LIMIT);
+                HALLUCINATION_MIN_CONFIDENCE, HALLUCINATION_MAX_CONFIDENCE,
+                HALLUCINATION_SAMPLE_LIMIT, userId);
 
         return new GovernanceSamples(
                 toBucket(duplicateCandidates),

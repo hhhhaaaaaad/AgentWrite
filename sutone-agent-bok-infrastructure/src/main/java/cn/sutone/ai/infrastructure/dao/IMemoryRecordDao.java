@@ -216,43 +216,66 @@ public interface IMemoryRecordDao {
     @Update("UPDATE memory_record SET status = #{status} WHERE id = #{id}")
     int updateStatus(@Param("id") Long id, @Param("status") String status);
 
-    /** P3 治理: 查询全部 ACTIVE 记忆（供重复聚类按 user_id+type 分组） */
+    /**
+     * P3 治理: 查询 ACTIVE 记忆（供重复聚类按 user_id+type 分组）。
+     *
+     * <p><b>{@code userId} 参数是安全边界，不是可选优化。</b>
+     * 为 {@code null} 时扫全库（治理 job 的常规用法，它本就要处理所有用户）；
+     * 非空时只扫该用户。<b>对外暴露的端点必须传它</b>——评测端点
+     * {@code /api/v1/eval/governance/samples} 曾因为调用的是无参版本，
+     * 把全库所有用户的记忆内容（含 {@code content}）返回给了调用方，
+     * 而它自身那套「校验 evalUserId」的命名空间防护形同虚设。</p>
+     */
     @Select("""
+            <script>
             SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
+            <if test="userId != null"> AND user_id = #{userId} </if>
+            </script>
             """)
-    List<MemoryRecordPO> selectActiveForDuplicateScan();
+    List<MemoryRecordPO> selectActiveForDuplicateScan(@Param("userId") Long userId);
 
-    /** P3 治理: 查询含 subject+predicate 的 ACTIVE 记忆（供事实一致性巡检聚合） */
+    /** P3 治理: 查询含 subject+predicate 的 ACTIVE 记忆（供事实一致性巡检聚合）。{@code userId} 语义同上。 */
     @Select("""
+            <script>
             SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
               AND subject IS NOT NULL AND predicate IS NOT NULL
+            <if test="userId != null"> AND user_id = #{userId} </if>
+            </script>
             """)
-    List<MemoryRecordPO> selectActiveForConsistencyScan();
+    List<MemoryRecordPO> selectActiveForConsistencyScan(@Param("userId") Long userId);
 
-    /** P3 治理: 扫描过期且 {@code last_accessed_at} 早于阈值时间的 ACTIVE 记忆（供软归档） */
+    /** P3 治理: 扫描过期且 {@code last_accessed_at} 早于阈值时间的 ACTIVE 记忆（供软归档）。{@code userId} 语义同上。 */
     @Select("""
+            <script>
             SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
-              AND expire_time IS NOT NULL AND expire_time < NOW()
-              AND (last_accessed_at IS NULL OR last_accessed_at < #{before})
+              AND expire_time IS NOT NULL AND expire_time &lt; NOW()
+              AND (last_accessed_at IS NULL OR last_accessed_at &lt; #{before})
+            <if test="userId != null"> AND user_id = #{userId} </if>
+            </script>
             """)
-    List<MemoryRecordPO> selectExpiredForArchive(@Param("before") LocalDateTime before);
+    List<MemoryRecordPO> selectExpiredForArchive(
+            @Param("before") LocalDateTime before, @Param("userId") Long userId);
 
-    /** P3 治理: 抽样 confidence 落在 [min,max] 灰色地带的 ACTIVE 记忆（供幻觉抽检） */
+    /** P3 治理: 抽样 confidence 落在 [min,max] 灰色地带的 ACTIVE 记忆（供幻觉抽检）。{@code userId} 语义同上。 */
     @Select("""
+            <script>
             SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record
             WHERE status = 'ACTIVE' AND is_deleted = 0
-              AND confidence >= #{minConfidence} AND confidence <= #{maxConfidence}
+              AND confidence >= #{minConfidence} AND confidence &lt;= #{maxConfidence}
+            <if test="userId != null"> AND user_id = #{userId} </if>
             ORDER BY RAND()
             LIMIT #{limit}
+            </script>
             """)
     List<MemoryRecordPO> selectSampleForHallucinationCheck(@Param("minConfidence") double minConfidence,
                                                            @Param("maxConfidence") double maxConfidence,
-                                                           @Param("limit") int limit);
+                                                           @Param("limit") int limit,
+                                                           @Param("userId") Long userId);
 }

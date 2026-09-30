@@ -223,29 +223,29 @@ public class MemoryRepository implements IMemoryRepository {
     }
 
     @Override
-    public List<MemoryRecordEntity> selectActiveForDuplicateScan() {
-        return memoryRecordDao.selectActiveForDuplicateScan().stream()
+    public List<MemoryRecordEntity> selectActiveForDuplicateScan(Long userId) {
+        return memoryRecordDao.selectActiveForDuplicateScan(userId).stream()
                 .map(this::toEntity)
                 .collect(Collectors.toList());
     }
 
     @Override
-    public List<MemoryRecordEntity> selectActiveForConsistencyScan() {
-        return memoryRecordDao.selectActiveForConsistencyScan().stream()
+    public List<MemoryRecordEntity> selectActiveForConsistencyScan(Long userId) {
+        return memoryRecordDao.selectActiveForConsistencyScan(userId).stream()
                 .map(this::toEntity)
                 .collect(Collectors.toList());
     }
 
     @Override
-    public List<MemoryRecordEntity> selectExpiredForArchive(LocalDateTime before) {
-        return memoryRecordDao.selectExpiredForArchive(before).stream()
+    public List<MemoryRecordEntity> selectExpiredForArchive(LocalDateTime before, Long userId) {
+        return memoryRecordDao.selectExpiredForArchive(before, userId).stream()
                 .map(this::toEntity)
                 .collect(Collectors.toList());
     }
 
     @Override
-    public List<MemoryRecordEntity> selectSampleForHallucinationCheck(double minConfidence, double maxConfidence, int limit) {
-        return memoryRecordDao.selectSampleForHallucinationCheck(minConfidence, maxConfidence, limit).stream()
+    public List<MemoryRecordEntity> selectSampleForHallucinationCheck(double minConfidence, double maxConfidence, int limit, Long userId) {
+        return memoryRecordDao.selectSampleForHallucinationCheck(minConfidence, maxConfidence, limit, userId).stream()
                 .map(this::toEntity)
                 .collect(Collectors.toList());
     }

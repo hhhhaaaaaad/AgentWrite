@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 /**
@@ -95,7 +96,7 @@ class MemoryGovernanceSplitTest {
         @Test
         @DisplayName("过期清理：只产出 ARCHIVE 决策，不落库")
         void expiredProducesDecisionWithoutPersisting() {
-            when(memoryRepository.selectExpiredForArchive(any(LocalDateTime.class)))
+            when(memoryRepository.selectExpiredForArchive(any(LocalDateTime.class), isNull()))
                     .thenReturn(List.of(record(1L, 100L, MemoryTypeVO.EVENT, "过期A", LocalDateTime.now()),
                             record(2L, 100L, MemoryTypeVO.EVENT, "过期B", LocalDateTime.now())));
 
@@ -123,7 +124,7 @@ class MemoryGovernanceSplitTest {
                     .id(2L).userId(100L).type(MemoryTypeVO.FACT).content("B")
                     .subject("user").predicate("city").value("上海")
                     .status(MemoryStatus.ACTIVE).createTime(base.plusDays(1)).build();
-            when(memoryRepository.selectActiveForConsistencyScan()).thenReturn(List.of(later, earliest));
+            when(memoryRepository.selectActiveForConsistencyScan(null)).thenReturn(List.of(later, earliest));
 
             List<GovernanceDecision> decisions = computeService.computeConsistency();
 
@@ -147,7 +148,7 @@ class MemoryGovernanceSplitTest {
             MemoryRecordEntity b = MemoryRecordEntity.builder()
                     .id(2L).userId(100L).type(MemoryTypeVO.FACT).subject("user").predicate("city")
                     .value("北京").status(MemoryStatus.ACTIVE).createTime(base.plusDays(1)).build();
-            when(memoryRepository.selectActiveForConsistencyScan()).thenReturn(List.of(a, b));
+            when(memoryRepository.selectActiveForConsistencyScan(null)).thenReturn(List.of(a, b));
 
             assertTrue(computeService.computeConsistency().isEmpty());
             assertNoPersistence();
@@ -158,7 +159,7 @@ class MemoryGovernanceSplitTest {
         void hallucinationQuarantinesUnsupported() {
             MemoryRecordEntity supported = record(1L, 100L, MemoryTypeVO.FACT, "有证据", LocalDateTime.now());
             MemoryRecordEntity unsupported = record(2L, 100L, MemoryTypeVO.FACT, "无证据", LocalDateTime.now());
-            when(memoryRepository.selectSampleForHallucinationCheck(anyDouble(), anyDouble(), anyInt()))
+            when(memoryRepository.selectSampleForHallucinationCheck(anyDouble(), anyDouble(), anyInt(), isNull()))
                     .thenReturn(List.of(supported, unsupported));
             when(memoryExtractor.verifyEvidence("有证据", null)).thenReturn(true);
             when(memoryExtractor.verifyEvidence("无证据", null)).thenReturn(false);
@@ -179,7 +180,7 @@ class MemoryGovernanceSplitTest {
             LocalDateTime base = LocalDateTime.of(2026, 1, 1, 0, 0);
             MemoryRecordEntity a = record(1L, 100L, MemoryTypeVO.FACT, "内容A", base);
             MemoryRecordEntity b = record(2L, 100L, MemoryTypeVO.FACT, "内容B", base.plusDays(1));
-            when(memoryRepository.selectActiveForDuplicateScan()).thenReturn(List.of(a, b));
+            when(memoryRepository.selectActiveForDuplicateScan(null)).thenReturn(List.of(a, b));
             when(embeddingClient.embed(anyString())).thenReturn(new float[]{0.1f});
             when(vectorStore.search(anyLong(), any(float[].class), anyInt()))
                     .thenReturn(List.of(new ScoredMemory(2L, "内容B", 0.95)));
@@ -199,10 +200,10 @@ class MemoryGovernanceSplitTest {
         @Test
         @DisplayName("四个 compute 方法在全空输入下均不落库")
         void allComputeMethodsAreReadOnlyOnEmptyInput() {
-            when(memoryRepository.selectActiveForDuplicateScan()).thenReturn(List.of());
-            when(memoryRepository.selectActiveForConsistencyScan()).thenReturn(List.of());
-            when(memoryRepository.selectExpiredForArchive(any(LocalDateTime.class))).thenReturn(List.of());
-            when(memoryRepository.selectSampleForHallucinationCheck(anyDouble(), anyDouble(), anyInt()))
+            when(memoryRepository.selectActiveForDuplicateScan(null)).thenReturn(List.of());
+            when(memoryRepository.selectActiveForConsistencyScan(null)).thenReturn(List.of());
+            when(memoryRepository.selectExpiredForArchive(any(LocalDateTime.class), isNull())).thenReturn(List.of());
+            when(memoryRepository.selectSampleForHallucinationCheck(anyDouble(), anyDouble(), anyInt(), isNull()))
                     .thenReturn(List.of());
 
             assertTrue(computeService.computeDuplicates().isEmpty());
@@ -217,19 +218,35 @@ class MemoryGovernanceSplitTest {
         @Test
         @DisplayName("样本导出：返回真实总数并带上限截断标记")
         void samplesReportTrueTotal() {
-            when(memoryRepository.selectActiveForDuplicateScan())
+            // stub 用 100L，与下面传给 samples() 的 userId 一致——这本身就验证了
+            // 「调用方给的 userId 确实被透传到了查询层」。用 any() 也能让用例通过，
+            // 但那样就测不到「参数被丢掉」这个正是本次修复的缺陷。
+            when(memoryRepository.selectActiveForDuplicateScan(100L))
                     .thenReturn(List.of(record(1L, 100L, MemoryTypeVO.FACT, "x", LocalDateTime.now())));
-            when(memoryRepository.selectActiveForConsistencyScan()).thenReturn(List.of());
-            when(memoryRepository.selectExpiredForArchive(any(LocalDateTime.class))).thenReturn(List.of());
-            when(memoryRepository.selectSampleForHallucinationCheck(anyDouble(), anyDouble(), anyInt()))
+            when(memoryRepository.selectActiveForConsistencyScan(100L)).thenReturn(List.of());
+            when(memoryRepository.selectExpiredForArchive(any(LocalDateTime.class), eq(100L))).thenReturn(List.of());
+            when(memoryRepository.selectSampleForHallucinationCheck(anyDouble(), anyDouble(), anyInt(), eq(100L)))
                     .thenReturn(List.of());
 
-            MemoryGovernanceComputeService.GovernanceSamples samples = computeService.samples();
+            MemoryGovernanceComputeService.GovernanceSamples samples = computeService.samples(100L);
 
             assertEquals(1, samples.duplicates().total());
             assertEquals(1, samples.duplicates().items().size());
             assertEquals(0, samples.consistency().total());
             assertNoPersistence();
+        }
+
+        @Test
+        @DisplayName("样本导出：userId 为空必须拒绝，不得退化成全库导出")
+        void samplesRejectNullUserId() {
+            // 这条不是形式主义。修复前的缺陷正是「调用方校验了 evalUserId 却没传下来」，
+            // 而服务层当时是全局查询——接口于是把全库所有用户的记忆内容返回给了调用方。
+            // 留一个「不传 userId 也能跑」的口子，等于把这个缺陷重新请回来：
+            // 编译期没有提示、运行期不报错，只有安全评审才能发现。
+            IllegalArgumentException ex = assertThrows(
+                    IllegalArgumentException.class, () -> computeService.samples(null));
+            assertTrue(ex.getMessage().contains("userId"), "错误信息要指出缺的是 userId");
+            verifyNoInteractions(memoryRepository);
         }
     }
 

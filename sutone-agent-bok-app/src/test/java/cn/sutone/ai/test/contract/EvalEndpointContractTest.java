@@ -339,7 +339,7 @@ class EvalEndpointContractTest {
         @Test
         @DisplayName("samples 返回四类样本桶")
         void samplesReturnsBuckets() throws Exception {
-            when(governanceComputeService.samples())
+            when(governanceComputeService.samples(anyLong()))
                     .thenReturn(new MemoryGovernanceComputeService.GovernanceSamples(
                             new MemoryGovernanceComputeService.GovernanceSampleBucket(1,
                                     List.of(new MemoryGovernanceComputeService.GovernanceSampleItem(
