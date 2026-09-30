@@ -5,6 +5,7 @@ import cn.sutone.ai.domain.agent.model.exception.MemoryEvalFencingException;
 import cn.sutone.ai.infrastructure.adapter.repository.EvalFencingRepository;
 import cn.sutone.ai.infrastructure.dao.IEvalFencingDao;
 import cn.sutone.ai.infrastructure.dao.po.EvalFencingPO;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -26,6 +28,10 @@ class EvalFencingRepositoryTest {
 
     @Mock
     private IEvalFencingDao evalFencingDao;
+
+    /** acquire 现在走编程式事务（事务外重试死锁），因此需要事务管理器。 */
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     @InjectMocks
     private EvalFencingRepository repository;

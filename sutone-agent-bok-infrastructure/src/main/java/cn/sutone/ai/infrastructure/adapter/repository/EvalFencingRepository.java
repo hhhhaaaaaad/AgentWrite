@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -42,12 +41,22 @@ public class EvalFencingRepository implements IEvalFencingRepository {
     @Resource
     private PlatformTransactionManager transactionManager;
 
-    private TransactionTemplate txTemplate;
-
-    @PostConstruct
-    void init() {
-        this.txTemplate = new TransactionTemplate(transactionManager);
-        this.txTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    /**
+     * 构造一个 pinned 到 REPEATABLE READ 的事务模板。
+     *
+     * <p><b>刻意每次现建，而不是用 {@code @PostConstruct} 缓存到字段。</b>
+     * {@link TransactionTemplate} 只是个不可变的配置载体，现建的开销可以忽略
+     * （{@code acquire} 一次 run 才调一次）。而缓存到字段会引入一个生命周期依赖：
+     * 字段必须在 Spring 调用 {@code @PostConstruct} 之后才可用，任何不经过容器的
+     * 实例化（尤其是单元测试里直接 new）都会让它在调用点变成 null，
+     * 报出一个与业务逻辑毫无关系的 NPE。这个坑真实踩过——
+     * {@code EvalFencingRepositoryTest} 的四条用例因此长期失败，
+     * 而失败信息只字未提「忘了调生命周期方法」。</p>
+     */
+    private TransactionTemplate newTransactionTemplate() {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        return template;
     }
 
     @Override
@@ -60,6 +69,7 @@ public class EvalFencingRepository implements IEvalFencingRepository {
 
     @Override
     public AcquireResult acquire(Long evalUserId, long expectedVersion, String newRunId) {
+        TransactionTemplate txTemplate = newTransactionTemplate();
         for (int attempt = 0; ; attempt++) {
             try {
                 return txTemplate.execute(status -> doAcquire(evalUserId, expectedVersion, newRunId));
