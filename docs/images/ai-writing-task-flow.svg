@@ -1,0 +1,181 @@
+<svg width="1800" height="1240" viewBox="0 0 1800 1240" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1800" y2="1240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563EB"/>
+    </marker>
+    <style>
+      .title { font: 700 34px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #0F172A; }
+      .subtitle { font: 400 16px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #475569; }
+      .laneTitle { font: 700 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #0F172A; }
+      .nodeText { font: 600 16px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #0F172A; }
+      .smallText { font: 500 14px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #334155; }
+      .decisionText { font: 700 15px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #7C2D12; }
+      .labelText { font: 600 13px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #1D4ED8; }
+      .endText { font: 700 15px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #14532D; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1240" fill="url(#bg)"/>
+
+  <text x="80" y="70" class="title">AI 写作任务投递与恢复流程图</text>
+  <text x="80" y="102" class="subtitle">覆盖请求接入、事务内落库、Outbox 补发、MQ 消费、执行心跳、SSE 推送与 Worker 故障恢复</text>
+
+  <!-- Lanes -->
+  <rect x="60" y="140" width="300" height="1020" rx="24" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="380" y="140" width="360" height="1020" rx="24" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="760" y="140" width="300" height="1020" rx="24" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="1080" y="140" width="360" height="1020" rx="24" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="1460" y="140" width="280" height="1020" rx="24" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="2"/>
+
+  <rect x="80" y="160" width="260" height="52" rx="16" fill="#DBEAFE"/>
+  <rect x="400" y="160" width="320" height="52" rx="16" fill="#DCFCE7"/>
+  <rect x="780" y="160" width="260" height="52" rx="16" fill="#FEE2E2"/>
+  <rect x="1100" y="160" width="320" height="52" rx="16" fill="#EDE9FE"/>
+  <rect x="1480" y="160" width="240" height="52" rx="16" fill="#FEF3C7"/>
+
+  <text x="210" y="193" text-anchor="middle" class="laneTitle">前端</text>
+  <text x="560" y="193" text-anchor="middle" class="laneTitle">Controller / Service / DB</text>
+  <text x="910" y="193" text-anchor="middle" class="laneTitle">Outbox / 调度</text>
+  <text x="1260" y="193" text-anchor="middle" class="laneTitle">RocketMQ / Consumer / Worker</text>
+  <text x="1600" y="193" text-anchor="middle" class="laneTitle">恢复链路</text>
+
+  <!-- Frontend -->
+  <rect x="100" y="260" width="220" height="88" rx="20" fill="white" stroke="#94A3B8" stroke-width="2"/>
+  <text x="210" y="295" text-anchor="middle" class="nodeText">提交写作任务</text>
+  <text x="210" y="321" text-anchor="middle" class="smallText">draftId / taskType</text>
+  <text x="210" y="343" text-anchor="middle" class="smallText">promptParams</text>
+
+  <rect x="100" y="760" width="220" height="88" rx="20" fill="white" stroke="#94A3B8" stroke-width="2"/>
+  <text x="210" y="796" text-anchor="middle" class="nodeText">SSE 补读 / 订阅</text>
+  <text x="210" y="822" text-anchor="middle" class="smallText">实时消费 Redis Stream</text>
+
+  <!-- App service -->
+  <rect x="450" y="260" width="220" height="88" rx="20" fill="white" stroke="#86EFAC" stroke-width="2"/>
+  <text x="560" y="295" text-anchor="middle" class="nodeText">Controller 收请求</text>
+  <text x="560" y="321" text-anchor="middle" class="smallText">获取当前 userId</text>
+
+  <rect x="450" y="380" width="220" height="88" rx="20" fill="white" stroke="#86EFAC" stroke-width="2"/>
+  <text x="560" y="415" text-anchor="middle" class="nodeText">Service 预处理</text>
+  <text x="560" y="441" text-anchor="middle" class="smallText">限流 + 防重复提交锁</text>
+
+  <rect x="430" y="510" width="260" height="180" rx="24" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="560" y="544" text-anchor="middle" class="nodeText">事务内处理</text>
+  <rect x="470" y="566" width="180" height="46" rx="14" fill="white" stroke="#86EFAC" stroke-width="2"/>
+  <text x="560" y="595" text-anchor="middle" class="smallText">创建 ai_task</text>
+  <rect x="470" y="626" width="180" height="46" rx="14" fill="white" stroke="#86EFAC" stroke-width="2"/>
+  <text x="560" y="655" text-anchor="middle" class="smallText">创建 outbox_event</text>
+
+  <rect x="450" y="730" width="220" height="88" rx="20" fill="white" stroke="#86EFAC" stroke-width="2"/>
+  <text x="560" y="766" text-anchor="middle" class="nodeText">事务外立即发送</text>
+  <text x="560" y="792" text-anchor="middle" class="smallText">尝试投递 RocketMQ</text>
+
+  <!-- Outbox -->
+  <polygon points="930,738 1010,794 930,850 850,794" fill="#FFF7ED" stroke="#FB923C" stroke-width="2"/>
+  <text x="930" y="790" text-anchor="middle" class="decisionText">立即发送</text>
+  <text x="930" y="812" text-anchor="middle" class="decisionText">是否成功?</text>
+
+  <rect x="800" y="900" width="220" height="88" rx="20" fill="white" stroke="#FCA5A5" stroke-width="2"/>
+  <text x="910" y="936" text-anchor="middle" class="nodeText">定时任务扫描</text>
+  <text x="910" y="962" text-anchor="middle" class="smallText">读取 outbox_event 补发</text>
+
+  <!-- MQ / Worker -->
+  <rect x="1150" y="260" width="220" height="88" rx="20" fill="white" stroke="#A78BFA" stroke-width="2"/>
+  <text x="1260" y="296" text-anchor="middle" class="nodeText">Consumer 收到消息</text>
+  <text x="1260" y="322" text-anchor="middle" class="smallText">进入任务消费链路</text>
+
+  <rect x="1150" y="380" width="220" height="88" rx="20" fill="white" stroke="#A78BFA" stroke-width="2"/>
+  <text x="1260" y="416" text-anchor="middle" class="nodeText">claimTask 抢占</text>
+  <text x="1260" y="442" text-anchor="middle" class="smallText">先抢占，后执行</text>
+
+  <polygon points="1260,510 1340,566 1260,622 1180,566" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="1260" y="562" text-anchor="middle" class="decisionText">抢占是否</text>
+  <text x="1260" y="584" text-anchor="middle" class="decisionText">成功?</text>
+
+  <rect x="1150" y="670" width="220" height="88" rx="20" fill="white" stroke="#A78BFA" stroke-width="2"/>
+  <text x="1260" y="706" text-anchor="middle" class="nodeText">执行 AgentWritingRunner</text>
+  <text x="1260" y="732" text-anchor="middle" class="smallText">真正开始生成内容</text>
+
+  <rect x="1150" y="790" width="220" height="88" rx="20" fill="white" stroke="#A78BFA" stroke-width="2"/>
+  <text x="1260" y="826" text-anchor="middle" class="nodeText">写 heartbeat_at</text>
+  <text x="1260" y="852" text-anchor="middle" class="smallText">持续上报执行心跳</text>
+
+  <rect x="1150" y="910" width="220" height="88" rx="20" fill="white" stroke="#A78BFA" stroke-width="2"/>
+  <text x="1260" y="946" text-anchor="middle" class="nodeText">推送 Redis Stream</text>
+  <text x="1260" y="972" text-anchor="middle" class="smallText">输出进度 / 增量结果</text>
+
+  <polygon points="1260,1030 1340,1086 1260,1142 1180,1086" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="1260" y="1082" text-anchor="middle" class="decisionText">执行结果</text>
+  <text x="1260" y="1104" text-anchor="middle" class="decisionText">如何?</text>
+
+  <rect x="1090" y="1070" width="70" height="54" rx="16" fill="#DCFCE7" stroke="#22C55E" stroke-width="2"/>
+  <text x="1125" y="1102" text-anchor="middle" class="endText">成功</text>
+
+  <rect x="1360" y="1070" width="70" height="54" rx="16" fill="#FEE2E2" stroke="#EF4444" stroke-width="2"/>
+  <text x="1395" y="1102" text-anchor="middle" class="decisionText">失败</text>
+
+  <!-- Recovery -->
+  <rect x="1490" y="420" width="220" height="88" rx="20" fill="white" stroke="#FBBF24" stroke-width="2"/>
+  <text x="1600" y="456" text-anchor="middle" class="nodeText">Worker 挂掉</text>
+  <text x="1600" y="482" text-anchor="middle" class="smallText">任务中断 / 心跳丢失</text>
+
+  <rect x="1490" y="560" width="220" height="88" rx="20" fill="white" stroke="#FBBF24" stroke-width="2"/>
+  <text x="1600" y="596" text-anchor="middle" class="nodeText">RecoveryJob 扫描</text>
+  <text x="1600" y="622" text-anchor="middle" class="smallText">识别超时未完成任务</text>
+
+  <rect x="1490" y="700" width="220" height="88" rx="20" fill="white" stroke="#FBBF24" stroke-width="2"/>
+  <text x="1600" y="736" text-anchor="middle" class="nodeText">重新补事件</text>
+  <text x="1600" y="762" text-anchor="middle" class="smallText">再次投递 MQ</text>
+
+  <!-- Main arrows -->
+  <path d="M320 304 H450" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M560 348 V380" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M560 468 V510" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M560 690 V730" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M670 774 H850" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <path d="M1010 794 H1150" stroke="#2563EB" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <text x="1080" y="766" text-anchor="middle" class="labelText">成功</text>
+
+  <path d="M930 850 V900" stroke="#2563EB" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <text x="952" y="884" class="labelText">失败</text>
+  <path d="M1020 944 H1110 V236 H1150" stroke="#2563EB" stroke-width="3" stroke-dasharray="10 8" marker-end="url(#arrowBlue)"/>
+  <text x="1088" y="924" class="labelText">补发后再消费</text>
+
+  <path d="M1260 348 V380" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1260 468 V510" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <path d="M1260 622 V670" stroke="#2563EB" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <text x="1274" y="652" class="labelText">是</text>
+
+  <path d="M1180 566 H1080" stroke="#94A3B8" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="1118" y="542" class="smallText">否，其他 Worker</text>
+  <text x="1118" y="562" class="smallText">已处理</text>
+
+  <path d="M1260 758 V790" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1260 878 V910" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1150 954 V1018 H340 V848 H320" stroke="#2563EB" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <text x="760" y="1004" text-anchor="middle" class="labelText">SSE 补读 / 订阅 Redis Stream</text>
+
+  <path d="M1260 998 V1030" stroke="#475569" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1180 1086 H1160" stroke="#16A34A" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1340 1086 H1360" stroke="#DC2626" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Recovery arrows -->
+  <path d="M1370 714 H1460 V508" stroke="#D97706" stroke-width="3" stroke-dasharray="10 8" marker-end="url(#arrow)"/>
+  <text x="1470" y="530" class="smallText">异常中断</text>
+  <path d="M1600 508 V560" stroke="#D97706" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1600 648 V700" stroke="#D97706" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1490 744 H1420 V304 H1370" stroke="#D97706" stroke-width="3" stroke-dasharray="10 8" marker-end="url(#arrow)"/>
+  <text x="1460" y="724" class="smallText">重新投 MQ</text>
+
+  <!-- Footer -->
+  <rect x="80" y="1184" width="1640" height="32" rx="12" fill="#E2E8F0"/>
+  <text x="900" y="1205" text-anchor="middle" class="smallText">关键保障点：事务内落库 + Outbox 补发 + claimTask 抢占 + heartbeat_at 心跳 + RecoveryJob 兜底恢复</text>
+</svg>
