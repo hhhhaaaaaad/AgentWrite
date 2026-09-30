@@ -1,0 +1,25 @@
+{"t":0,"agent":"system","event":"skill_invoked","skill_name":"oh-my-claudecode:team"}
+{"t":0,"agent":"a4471d1","agent_type":"general-purpose","event":"agent_start","parent_mode":"team"}
+{"t":0,"agent":"a4471d1","agent_type":"general-purpose","event":"agent_stop","success":true,"duration_ms":166848}
+{"t":0,"agent":"ac71ffc","agent_type":"general-purpose","event":"agent_start","parent_mode":"team"}
+{"t":0,"agent":"aeb3289","agent_type":"general-purpose","event":"agent_start","parent_mode":"team"}
+{"t":0,"agent":"ac71ffc","agent_type":"general-purpose","event":"agent_stop","success":true,"duration_ms":590546}
+{"t":0,"agent":"ac2bd7a","agent_type":"general-purpose","event":"agent_start","parent_mode":"team"}
+{"t":0,"agent":"a481ce9","agent_type":"general-purpose","event":"agent_start","parent_mode":"team"}
+{"t":0,"agent":"a481ce9","agent_type":"general-purpose","event":"agent_stop","success":true,"duration_ms":286004}
+{"t":0,"agent":"system","event":"keyword_detected","keyword":"ralph"}
+{"t":0,"agent":"system","event":"mode_change","mode_from":"none","mode_to":"ralph"}
+{"t":0,"agent":"a65867f","agent_type":"untracked-native-fork","event":"agent_stop","success":true,"synthetic":true,"telemetry_status":"unmatched_stop","reason":"SubagentStop arrived without a matching SubagentStart; native Agent/Task start telemetry was not observed."}
+{"t":0,"agent":"ae15a01","agent_type":"untracked-native-fork","event":"agent_stop","success":true,"synthetic":true,"telemetry_status":"unmatched_stop","reason":"SubagentStop arrived without a matching SubagentStart; native Agent/Task start telemetry was not observed."}
+{"t":0,"agent":"a031b79","agent_type":"untracked-native-fork","event":"agent_stop","success":true,"synthetic":true,"telemetry_status":"unmatched_stop","reason":"SubagentStop arrived without a matching SubagentStart; native Agent/Task start telemetry was not observed."}
+{"t":0,"agent":"system","event":"skill_invoked","skill_name":"oh-my-claudecode:ralplan"}
+{"t":0,"agent":"a856bec","agent_type":"planner","event":"agent_start","parent_mode":"ralph"}
+{"t":0,"agent":"a856bec","agent_type":"planner","event":"agent_stop","success":true,"duration_ms":416364}
+{"t":0,"agent":"a4ac759","agent_type":"architect","event":"agent_start","parent_mode":"ralph"}
+{"t":0,"agent":"a4ac759","agent_type":"architect","event":"agent_stop","success":true,"duration_ms":163514}
+{"t":0,"agent":"aed836b","agent_type":"critic","event":"agent_start","parent_mode":"ralph"}
+{"t":0,"agent":"aed836b","agent_type":"critic","event":"agent_stop","success":true,"duration_ms":302969}
+{"t":0,"agent":"a529e62","agent_type":"architect","event":"agent_start","parent_mode":"ralph"}
+{"t":0,"agent":"a529e62","agent_type":"architect","event":"agent_stop","success":true,"duration_ms":244824}
+{"t":0,"agent":"a628f8f","agent_type":"critic","event":"agent_start","parent_mode":"ralph"}
+{"t":0,"agent":"a628f8f","agent_type":"critic","event":"agent_stop","success":true,"duration_ms":269411}

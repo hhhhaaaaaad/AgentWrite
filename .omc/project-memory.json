@@ -1,0 +1,525 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1790687379937,
+  "projectRoot": "D:\\java\\scaffold\\AgentWrite",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Java",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pom.xml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "maven",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "AgentZoo-Animals": {
+      "path": "AgentZoo-Animals",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1790687379811,
+      "keyFiles": [
+        "electron.vite.config.ts",
+        "package.json",
+        "README.md",
+        "tsconfig.json",
+        "tsconfig.node.json"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1790687379812,
+      "keyFiles": [
+        "AgentWrite-interview-handbook.md",
+        "ai-writing-markdown-heading-body-fix-summary.md"
+      ]
+    },
+    "prompt": {
+      "path": "prompt",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790687379813,
+      "keyFiles": [
+        "lists-and-bullets-zh.md"
+      ]
+    },
+    "sutone-agent-bok-api": {
+      "path": "sutone-agent-bok-api",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790687379814,
+      "keyFiles": [
+        "pom.xml"
+      ]
+    },
+    "sutone-agent-bok-app": {
+      "path": "sutone-agent-bok-app",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1790687379814,
+      "keyFiles": [
+        "build.sh",
+        "Dockerfile",
+        "pom.xml",
+        "push.sh"
+      ]
+    },
+    "sutone-agent-bok-domain": {
+      "path": "sutone-agent-bok-domain",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790687379815,
+      "keyFiles": [
+        "pom.xml"
+      ]
+    },
+    "sutone-agent-bok-infrastructure": {
+      "path": "sutone-agent-bok-infrastructure",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790687379815,
+      "keyFiles": [
+        "pom.xml"
+      ]
+    },
+    "sutone-agent-bok-trigger": {
+      "path": "sutone-agent-bok-trigger",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790687379817,
+      "keyFiles": [
+        "pom.xml"
+      ]
+    },
+    "sutone-agent-bok-types": {
+      "path": "sutone-agent-bok-types",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790687379817,
+      "keyFiles": [
+        "pom.xml"
+      ]
+    },
+    "svg-covers": {
+      "path": "svg-covers",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1790687379818,
+      "keyFiles": [
+        "sample-1-tech-dark.svg",
+        "sample-2-minimal-light.svg",
+        "sample-3-colorful-card.svg"
+      ]
+    },
+    "uploads": {
+      "path": "uploads",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1790687379818,
+      "keyFiles": [
+        "4ec05872-093b-407b-b878-12ed99bae778.svg",
+        "5801420e-cc00-4a5e-8585-07e2cc75da59.svg"
+      ]
+    },
+    "AgentZoo-Animals\\docs": {
+      "path": "AgentZoo-Animals\\docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1790687379819,
+      "keyFiles": [
+        "PLAN.md"
+      ]
+    },
+    "AgentZoo-Animals\\src": {
+      "path": "AgentZoo-Animals\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379820,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-api\\src": {
+      "path": "sutone-agent-bok-api\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379821,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-app\\data": {
+      "path": "sutone-agent-bok-app\\data",
+      "purpose": "Data files",
+      "fileCount": 0,
+      "lastAccessed": 1790687379822,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-app\\src": {
+      "path": "sutone-agent-bok-app\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379822,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-domain\\src": {
+      "path": "sutone-agent-bok-domain\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379823,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-infrastructure\\src": {
+      "path": "sutone-agent-bok-infrastructure\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379824,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-trigger\\src": {
+      "path": "sutone-agent-bok-trigger\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379825,
+      "keyFiles": []
+    },
+    "sutone-agent-bok-types\\src": {
+      "path": "sutone-agent-bok-types\\src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1790687379826,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/agents/plan_agent.py",
+      "accessCount": 34,
+      "lastAccessed": 1788066016577,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/tools/transcribe.py",
+      "accessCount": 24,
+      "lastAccessed": 1788019518455,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/config.py",
+      "accessCount": 23,
+      "lastAccessed": 1787996110571,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/tools/vlm_understand.py",
+      "accessCount": 21,
+      "lastAccessed": 1787994205395,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/api/analyze.py",
+      "accessCount": 16,
+      "lastAccessed": 1787994541282,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/tools/scene_detect.py",
+      "accessCount": 14,
+      "lastAccessed": 1787989333815,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/agents/analysis_agent.py",
+      "accessCount": 10,
+      "lastAccessed": 1787994352347,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/tools/frame_extract.py",
+      "accessCount": 9,
+      "lastAccessed": 1787989333929,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/schemas/analysis.py",
+      "accessCount": 9,
+      "lastAccessed": 1787994328012,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-infrastructure/pom.xml",
+      "accessCount": 8,
+      "lastAccessed": 1787881693662,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-app/src/main/resources/application.yml",
+      "accessCount": 8,
+      "lastAccessed": 1787916998831,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/docs/plan-schema.json",
+      "accessCount": 8,
+      "lastAccessed": 1787989410303,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/schemas/plan.py",
+      "accessCount": 8,
+      "lastAccessed": 1787990225287,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/schemas/__init__.py",
+      "accessCount": 8,
+      "lastAccessed": 1787994331354,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/README.md",
+      "accessCount": 7,
+      "lastAccessed": 1787882018980,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/docs/AgentCut-整体设计方案.md",
+      "accessCount": 6,
+      "lastAccessed": 1787847939227,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/docker-compose.yml",
+      "accessCount": 6,
+      "lastAccessed": 1787848071028,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/pom.xml",
+      "accessCount": 5,
+      "lastAccessed": 1787848010627,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-app/pom.xml",
+      "accessCount": 5,
+      "lastAccessed": 1787848016523,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-trigger/pom.xml",
+      "accessCount": 5,
+      "lastAccessed": 1787848017409,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/pom.xml",
+      "accessCount": 5,
+      "lastAccessed": 1787848018347,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/requirements.txt",
+      "accessCount": 5,
+      "lastAccessed": 1787989422066,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-api/pom.xml",
+      "accessCount": 4,
+      "lastAccessed": 1787807117696,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/main.py",
+      "accessCount": 4,
+      "lastAccessed": 1787928559410,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-types/pom.xml",
+      "accessCount": 3,
+      "lastAccessed": 1787805933549,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-front/src/App.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1787848060163,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-front/package.json",
+      "accessCount": 3,
+      "lastAccessed": 1787848061995,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-types/src/main/java/cn/sutone/cut/types/enums/ResponseCode.java",
+      "accessCount": 3,
+      "lastAccessed": 1787848072256,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-front/src/main.tsx",
+      "accessCount": 3,
+      "lastAccessed": 1787848077144,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut",
+      "accessCount": 3,
+      "lastAccessed": 1787989960307,
+      "type": "directory"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/agents/__init__.py",
+      "accessCount": 3,
+      "lastAccessed": 1787994205026,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/__init__.py",
+      "accessCount": 2,
+      "lastAccessed": 1787804204213,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/api/__init__.py",
+      "accessCount": 2,
+      "lastAccessed": 1787804206406,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-app/src/main/java/cn/sutone/cut/app/AgentCutApplication.java",
+      "accessCount": 2,
+      "lastAccessed": 1787806457993,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-trigger/src/main/java/cn/sutone/cut/trigger/http/HealthController.java",
+      "accessCount": 2,
+      "lastAccessed": 1787847970250,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/Operation.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848029008,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/OperationType.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848029717,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/OpSpeed.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848038656,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/OpCrop.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848039712,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/OpSubtitle.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848040542,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/OpVolume.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848041083,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/plan/model/valobj/OpMute.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848042262,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-front/vite.config.ts",
+      "accessCount": 2,
+      "lastAccessed": 1787848062682,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-front/tsconfig.json",
+      "accessCount": 2,
+      "lastAccessed": 1787848062715,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-types/src/main/java/cn/sutone/cut/types/exception/AppException.java",
+      "accessCount": 2,
+      "lastAccessed": 1787848072632,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-api/src/main/java/cn/sutone/cut/api/package-info.java",
+      "accessCount": 1,
+      "lastAccessed": 1787804051054,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-domain/src/main/java/cn/sutone/cut/domain/package-info.java",
+      "accessCount": 1,
+      "lastAccessed": 1787804054203,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-backend/sutone-agent-cut-infrastructure/src/main/java/cn/sutone/cut/infrastructure/package-info.java",
+      "accessCount": 1,
+      "lastAccessed": 1787804065994,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-ai/app/tools/__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1787804082681,
+      "type": "file"
+    },
+    {
+      "path": "E:/java/AgentCut/AgentCut-front/index.html",
+      "accessCount": 1,
+      "lastAccessed": 1787804092787,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

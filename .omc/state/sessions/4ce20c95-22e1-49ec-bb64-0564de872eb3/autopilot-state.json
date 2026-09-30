@@ -1,0 +1,11 @@
+{
+  "active": true,
+  "started_at": "2026-09-30T03:28:43.673Z",
+  "original_prompt": "/team autopilot\n你可以尽量并行的开发，来完成后续的AW优化相关的任务",
+  "session_id": "4ce20c95-22e1-49ec-bb64-0564de872eb3",
+  "project_path": "D:\\java\\scaffold\\AgentWrite",
+  "reinforcement_count": 1,
+  "awaiting_confirmation": true,
+  "awaiting_confirmation_set_at": "2026-09-30T03:28:43.673Z",
+  "last_checked_at": "2026-09-30T03:34:48.261Z"
+}

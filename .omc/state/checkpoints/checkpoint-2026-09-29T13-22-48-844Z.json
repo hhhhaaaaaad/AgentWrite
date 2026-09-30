@@ -1,0 +1,22 @@
+{
+  "created_at": "2026-09-29T13:22:48.842Z",
+  "session_id": "4ce20c95-22e1-49ec-bb64-0564de872eb3",
+  "trigger": "manual",
+  "active_modes": {
+    "ralph": {
+      "iteration": 1,
+      "prompt": ""
+    }
+  },
+  "todo_summary": {
+    "pending": 0,
+    "in_progress": 0,
+    "completed": 0
+  },
+  "wisdom_exported": false,
+  "background_jobs": {
+    "active": [],
+    "recent": [],
+    "stats": null
+  }
+}
