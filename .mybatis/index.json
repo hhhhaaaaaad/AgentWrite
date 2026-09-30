@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "timestamp": 1790666644281,
+  "projectRoot": "d:\\java\\scaffold\\AgentWrite",
+  "entries": [
+    {
+      "path": "sutone-agent-bok-trigger\\target\\classes\\cn\\sutone\\ai\\trigger\\security\\SecurityConfig.class",
+      "mtime": 1788017947597.9858,
+      "size": 7827
+    },
+    {
+      "path": "sutone-agent-bok-app\\target\\classes\\cn\\sutone\\ai\\config\\WebMvcConfig.class",
+      "mtime": 1788017954623.3406,
+      "size": 2099
+    },
+    {
+      "path": "sutone-agent-bok-domain\\target\\classes\\cn\\sutone\\ai\\domain\\agent\\service\\chat\\CustomApiConfigManager$CustomApiConfig.class",
+      "mtime": 1790666602860.102,
+      "size": 1403
+    },
+    {
+      "path": "sutone-agent-bok-infrastructure\\target\\classes\\cn\\sutone\\ai\\infrastructure\\redis\\RedisConfig.class",
+      "mtime": 1790666638767.8835,
+      "size": 2904
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目速通与面试教练 V2"
+  short_description: "按目标、基础和时间裁剪学习路径，低 Token 完成单点或项目速通"
+  default_prompt: "Use $project-interview-sprint-v2 to assess my goal and self-ratings, recommend three time options, and start only after I confirm the learning configuration."
