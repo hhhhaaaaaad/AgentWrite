@@ -259,6 +259,27 @@ public class MemoryManager {
         return memoryRetriever.search(userId, query, topK);
     }
 
+    /** 评测检索（冻结副作用 + exact/hnsw_ef 透传） */
+    public List<MemoryRetriever.MemoryItem> searchForEval(Long userId, String query, int topK, double threshold,
+                                                          boolean freezeSideEffects, Boolean exact, Integer hnswEf) {
+        return memoryRetriever.searchForEval(userId, query, topK, threshold, freezeSideEffects, exact, hnswEf);
+    }
+
+    /** 评测抽取：对给定消息做 LLM 抽取，仅返回候选，不落库 */
+    public List<MemoryCandidate> extractForEval(Long userId, List<Map<String, String>> messages) {
+        List<MemoryRecordEntity> existing = memoryRepository.queryByUserId(userId, 0, 50);
+        return memoryExtractor.extract(existing, messages, Collections.emptyList());
+    }
+
+    /** 评测注入上下文：返回 budgeted + formatted + tokenCount */
+    public MemoryRetriever.RetrieveContextResult retrieveContextForEval(Long userId, String queryContext, int topK) {
+        MemoryRetrieveQueryVO queryVO = MemoryRetrieveQueryVO.builder()
+                .taskType("LEGACY")
+                .contentMd(queryContext)
+                .build();
+        return memoryRetriever.retrieveContextDetail(userId, queryVO, topK);
+    }
+
     /** 为 Agent prompt 格式化记忆上下文 */
     public String retrieveContext(Long userId, String queryContext, int topK) {
         if (memoryCircuitBreaker.isDegraded()) {
@@ -286,13 +307,38 @@ public class MemoryManager {
         return memoryRepository.queryById(memoryId);
     }
 
-    /** 绕过 LLM 抽取直接写入（评测/种子数据用） */
-    public void addDirect(Long userId, MemoryTypeVO type, String content) {
+    /** addDirect 返回值：seed 幂等语义（inserted=false 表示撞 uk_user_hash 唯一索引，复用已有行） */
+    public record AddDirectResult(long id, boolean inserted) {
+    }
+
+    /**
+     * 绕过 LLM 抽取直接写入（评测/种子数据用）。
+     *
+     * <p>幂等：先尝试 insert，撞 {@code uk_user_hash(user_id, content_hash)} 唯一索引抛
+     * {@code DuplicateKeyException} 时回查已存在行，返回 {@code inserted=false} 复用已有 id，
+     * 不重复写向量。仅新增行才 embed + upsert 向量并 bump 版本。</p>
+     */
+    public AddDirectResult addDirect(Long userId, MemoryTypeVO type, String content) {
         String hash = DigestUtils.md5Hex(content);
         MemoryRecordEntity record = MemoryRecordEntity.create(
                 null, userId, type.getCode(), content, hash, "eval-seed");
         record.setContentTokenized(content);
-        Long id = memoryRepository.insert(record);
+        Long id;
+        boolean inserted;
+        try {
+            id = memoryRepository.insert(record);
+            inserted = true;
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            MemoryRecordEntity existing = memoryRepository.selectByUserIdAndHash(userId, hash);
+            if (existing == null) {
+                throw e; // 唯一键冲突却查不到已存在行，属异常，不吞
+            }
+            id = existing.getId();
+            inserted = false;
+        }
+        if (!inserted) {
+            return new AddDirectResult(id, false);
+        }
         try {
             float[] emb = embeddingClient.embed(content);
             if (emb.length > 0) {
@@ -304,6 +350,26 @@ public class MemoryManager {
             memoryRepository.updateVectorStatus(id, "PENDING");
         }
         bumpMemoryVersion(userId);
+        return new AddDirectResult(id, true);
+    }
+
+    /**
+     * 评测 reset：物理删除某命名空间全部记忆 + 清空向量，返回删除行数。
+     *
+     * <p>顺序：先删权威源 MySQL（释放 uk_user_hash 唯一键），再删向量缓存。若向量删除失败抛异常
+     * （失败优先于静默成功）；此时 MySQL 已清空，残留的孤儿向量会被检索 pipeline 的
+     * {@code filterHits}（回表 null 过滤）兜底丢弃，重复 reset 幂等（MySQL 再删 0 行、向量再删 no-op）。</p>
+     */
+    public int reset(Long userId) {
+        int deleted = memoryRepository.deleteByUserId(userId);
+        try {
+            vectorStore.removeByUserId(userId);
+        } catch (Exception e) {
+            log.error("reset 向量删除失败 userId={}: {}", userId, e.getMessage());
+            throw e;
+        }
+        bumpMemoryVersion(userId);
+        return deleted;
     }
 
     /** 逻辑删除记忆 */
@@ -333,7 +399,7 @@ public class MemoryManager {
      * <p>搜索/画像缓存 key 拼接此版本，写入后 INCR 即令旧缓存 key 失配自然失效。
      * Redis 异常仅影响缓存失效，不回滚已落库数据，故内部吞异常。</p>
      */
-    private void bumpMemoryVersion(Long userId) {
+    void bumpMemoryVersion(Long userId) {
         try {
             redisTemplate.opsForValue().increment("memory:user:" + userId + ":version");
         } catch (Exception e) {

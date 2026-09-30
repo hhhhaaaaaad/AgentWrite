@@ -105,4 +105,10 @@ public interface IMemoryMetricsPort {
 
     /** 记录一次语义冲突/争议标记。 */
     void incrementWriteConflict();
+
+    /** 当前派生驳回率（评测/熔断读取用） */
+    double getExtractionRejectRate();
+
+    /** 当前向量同步积压数（评测向量就绪屏障读取用） */
+    long getVectorSyncPendingCount();
 }

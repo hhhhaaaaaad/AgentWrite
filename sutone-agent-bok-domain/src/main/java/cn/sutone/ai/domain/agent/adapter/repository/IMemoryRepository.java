@@ -18,6 +18,12 @@ public interface IMemoryRepository {
     /** 批量回表加载权威元数据（检索融合后按 id 批量取权威字段，MySQL 为权威） */
     List<MemoryRecordEntity> queryByIds(List<Long> ids);
 
+    /** seed 幂等：按 (userId, contentHash) 查已存在记忆（撞 uk_user_hash 后回查 createdId） */
+    MemoryRecordEntity selectByUserIdAndHash(Long userId, String contentHash);
+
+    /** 评测 reset：物理删除某命名空间全部记忆，返回删除行数 */
+    int deleteByUserId(Long userId);
+
     List<MemoryRecordEntity> queryByUserId(Long userId, int offset, int limit);
 
     int countByUserId(Long userId);

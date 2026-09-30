@@ -67,6 +67,19 @@ public interface IMemoryRecordDao {
             """)
     int countByUserId(@Param("userId") Long userId);
 
+    /** seed 幂等：按 (user_id, content_hash) 查唯一已存在行（撞 uk_user_hash 后回查 createdId） */
+    @Select("""
+            SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
+            FROM memory_record
+            WHERE user_id = #{userId} AND content_hash = #{contentHash} AND is_deleted = 0
+            LIMIT 1
+            """)
+    MemoryRecordPO selectByUserIdAndHash(@Param("userId") Long userId, @Param("contentHash") String contentHash);
+
+    /** 评测 reset：物理删除某命名空间全部记忆（uk_user_hash 不区分软删，必须物理删才释放唯一键） */
+    @Delete("DELETE FROM memory_record WHERE user_id = #{userId}")
+    int deleteByUserId(@Param("userId") Long userId);
+
     @Select("""
             SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary
             FROM memory_record

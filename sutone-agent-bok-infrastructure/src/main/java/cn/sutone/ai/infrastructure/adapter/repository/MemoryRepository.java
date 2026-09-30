@@ -58,6 +58,16 @@ public class MemoryRepository implements IMemoryRepository {
     }
 
     @Override
+    public MemoryRecordEntity selectByUserIdAndHash(Long userId, String contentHash) {
+        return toEntity(memoryRecordDao.selectByUserIdAndHash(userId, contentHash));
+    }
+
+    @Override
+    public int deleteByUserId(Long userId) {
+        return memoryRecordDao.deleteByUserId(userId);
+    }
+
+    @Override
     public List<MemoryRecordEntity> queryByUserId(Long userId, int offset, int limit) {
         return memoryRecordDao.selectByUserId(userId, offset, limit).stream()
                 .map(this::toEntity)

@@ -5,6 +5,7 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
 import cn.sutone.ai.domain.agent.model.exception.MemoryVectorStoreException;
+import cn.sutone.ai.domain.agent.model.valobj.MemorySearchOptions;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
 import cn.sutone.ai.infrastructure.metrics.MemoryMetrics;
@@ -159,6 +160,11 @@ public class QdrantVectorStore implements IMemoryVectorStore {
 
     @Override
     public List<ScoredMemory> search(Long userId, float[] queryEmbedding, int topK) {
+        return search(userId, queryEmbedding, topK, MemorySearchOptions.defaults());
+    }
+
+    @Override
+    public List<ScoredMemory> search(Long userId, float[] queryEmbedding, int topK, MemorySearchOptions options) {
         try {
             String url = baseUrl + "/collections/" + collectionName + "/points/search";
             Map<String, Object> mustFilter = Map.of(
@@ -170,6 +176,16 @@ public class QdrantVectorStore implements IMemoryVectorStore {
             body.put("limit", topK);
             body.put("with_payload", true);
             body.put("filter", Map.of("must", List.of(mustFilter)));
+            if (options != null && options.hasParams()) {
+                Map<String, Object> searchParams = new LinkedHashMap<>();
+                if (options.exact() != null) {
+                    searchParams.put("exact", options.exact());
+                }
+                if (options.hnswEf() != null) {
+                    searchParams.put("hnsw_ef", options.hnswEf());
+                }
+                body.put("search_params", searchParams);
+            }
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -212,6 +228,25 @@ public class QdrantVectorStore implements IMemoryVectorStore {
             log.error("Qdrant delete failed id={}: {}", memoryId, e.getMessage());
             memoryMetrics.incrementQdrantFailure("delete");
             throw new MemoryVectorStoreException("qdrant delete failed id=" + memoryId, e);
+        }
+    }
+
+    @Override
+    public void removeByUserId(Long userId) {
+        try {
+            String url = baseUrl + "/collections/" + collectionName + "/points/delete";
+            Map<String, Object> mustFilter = Map.of(
+                    "key", "user_id",
+                    "match", Map.of("value", userId)
+            );
+            Map<String, Object> body = Map.of("filter", Map.of("must", List.of(mustFilter)));
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            rest.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+        } catch (Exception e) {
+            log.error("Qdrant removeByUserId failed userId={}: {}", userId, e.getMessage());
+            memoryMetrics.incrementQdrantFailure("delete_by_user");
+            throw new MemoryVectorStoreException("qdrant removeByUserId failed userId=" + userId, e);
         }
     }
 

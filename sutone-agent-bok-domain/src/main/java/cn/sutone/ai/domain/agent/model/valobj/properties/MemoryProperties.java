@@ -21,6 +21,7 @@ public class MemoryProperties {
     private Retrieval retrieval = new Retrieval();
     private Inject inject = new Inject();
     private Alert alert = new Alert();
+    private Eval eval = new Eval();
 
     @Data
     public static class Qdrant {
@@ -81,6 +82,23 @@ public class MemoryProperties {
     public static class Inject {
         /** 单次注入 token 预算（默认 800，中文按 1 token/字 估算） */
         private int maxTokens = 800;
+    }
+
+    /**
+     * 评测模式配置（独立评测平台调用 Java eval 实例时启用）。
+     *
+     * <p>{@code enabled=true} 时：禁用业务 cron（治理/向量同步）、连接专用库与 collection。
+     * {@code baseUserId}/{@code userIdRange} 定义 eval_user_id 合法命名空间，服务端据此校验
+     * 防止越界访问业务 userId（IDOR 防护）。派生规则见《方案》per-config derived userId。</p>
+     */
+    @Data
+    public static class Eval {
+        /** 评测模式开关：true 时禁用业务 cron、使用专用库/集合 */
+        private boolean enabled = false;
+        /** eval_user_id 派生基数（避开业务 userId 段） */
+        private long baseUserId = 9_000_000_000L;
+        /** eval_user_id 取值范围大小（派生 id ∈ [base, base+range)） */
+        private long userIdRange = 1_000_000L;
     }
 
     /**

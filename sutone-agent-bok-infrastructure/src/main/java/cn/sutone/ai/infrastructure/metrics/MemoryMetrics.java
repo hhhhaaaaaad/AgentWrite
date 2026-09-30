@@ -195,11 +195,13 @@ public class MemoryMetrics implements IMemoryMetricsPort {
     }
 
     /** 当前派生驳回率（熔断巡检读取用） */
+    @Override
     public double getExtractionRejectRate() {
         return extractionRejectRate;
     }
 
     /** 当前向量同步积压数（熔断巡检读取用；未注册 Supplier 时返回 0） */
+    @Override
     public long getVectorSyncPendingCount() {
         Supplier<? extends Number> s = vectorSyncPendingSupplier;
         return s == null ? 0L : s.get().longValue();

@@ -42,6 +42,8 @@ public class SecurityConfig {
                         // 后续如引入角色体系，应改为 hasRole("ADMIN")，或将该操作迁移为内部定时/运维脚本（不暴露 HTTP）。
                         .requestMatchers("/api/v1/memory/migrate/all").authenticated()
                         .requestMatchers("/api/v1/memory/**").authenticated()
+                        // 评测端点：仅 ROLE_EVAL 可访问（token 需带 role=EVAL 声明）
+                        .requestMatchers("/api/v1/eval/**").hasRole("EVAL")
                         .requestMatchers("/api/v1/writing/chat/**").authenticated()
                         .anyRequest().authenticated()
                 )

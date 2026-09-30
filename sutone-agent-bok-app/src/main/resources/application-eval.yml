@@ -1,0 +1,101 @@
+server:
+  port: 8092
+
+thread:
+  pool:
+    executor:
+      config:
+        core-pool-size: 10
+        max-pool-size: 30
+        keep-alive-time: 5000
+        block-queue-size: 5000
+        policy: CallerRunsPolicy
+
+spring:
+  config:
+    import:
+      - classpath:agent/agent-draw-io.yml
+      - classpath:agent/agent-ppt.yml
+      - classpath:agent/agent-illustration-analysis.yml
+      - classpath:agent/agent-writing.yml
+      - classpath:agent/agent-writing-chat.yml
+      - classpath:agent/agent-writing-single.yml
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:16379}
+  datasource:
+    username: root
+    password: 123456
+    # 评测实例使用专用 MySQL database（与业务库 sutone_agent_bok 隔离）
+    url: jdbc:mysql://127.0.0.1:13306/sutone_agent_bok_eval?useUnicode=true&characterEncoding=utf8&autoReconnect=true&zeroDateTimeBehavior=convertToNull&serverTimezone=UTC&useSSL=false
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    hikari:
+      pool-name: Eval_HikariCP
+      minimum-idle: 5
+      idle-timeout: 180000
+      maximum-pool-size: 15
+      auto-commit: true
+      max-lifetime: 1800000
+      connection-timeout: 30000
+      connection-test-query: SELECT 1
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+jwt:
+  secret: ${JWT_SECRET:sutone-agent-bok-jwt-secret-key-2026}
+  expiration: 7200000
+
+upload:
+  dir: ./uploads
+
+# 记忆系统：评测实例配置（eval 模式）
+memory:
+  eval:
+    enabled: true
+    base-user-id: 9000000000
+    user-id-range: 1000000
+  inject:
+    enabled: false
+  embedding:
+    base-url: ${MEMORY_EMBEDDING_BASE_URL:https://api.siliconflow.cn}
+    api-key: ${MEMORY_EMBEDDING_API_KEY}
+    model: ${MEMORY_EMBEDDING_MODEL:BAAI/bge-large-zh-v1.5}
+    embeddings-path: /v1/embeddings
+  vector-store: ${MEMORY_VECTOR_STORE:qdrant}
+  qdrant:
+    url: ${QDRANT_URL:http://localhost:6333}
+    # 评测实例使用专用 Qdrant collection（与业务 agent_memory 隔离）
+    collection: agent_memory_eval
+  reranker:
+    enabled: false
+    base-url: ${MEMORY_RERANKER_BASE_URL:https://api.siliconflow.cn/v1}
+    api-key: ${MEMORY_EMBEDDING_API_KEY}
+    model: BAAI/bge-reranker-v2-m3
+    timeout: 3000
+  cache:
+    profile-ttl-minutes: 10
+    profile-max-items: 20
+    search-ttl-minutes: 2
+    hot-importance-threshold: 0.7
+  extraction:
+    max-content-length: 500
+  importance:
+    base-weight: 0.5
+    frequency-weight: 0.3
+    recency-weight: 0.2
+    min: 0.1
+    max: 1.0
+
+# API Key 加密密钥（多租户，生产环境必须用环境变量覆盖）
+crypto:
+  api-key:
+    secret: ${CRYPTO_API_KEY_SECRET:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff}
+
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml

@@ -7,6 +7,7 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.adapter.repository.IRerankerClient;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
+import cn.sutone.ai.domain.agent.model.valobj.MemorySearchOptions;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.model.valobj.NormalizedMemoryQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
@@ -113,7 +114,37 @@ public class MemoryRetriever {
         }
     }
 
+    /**
+     * 评测检索：可冻结副作用（不写 access/缓存/rerank）+ 透传 exact/hnsw_ef。
+     *
+     * @param freezeSideEffects true 时跳过访问回写、搜索缓存读写、rerank（可复现模式）
+     * @param exact             Qdrant 精确检索（null=默认近似 HNSW）
+     * @param hnswEf            Qdrant hnsw_ef（null=Qdrant 默认）
+     */
+    public List<MemoryItem> searchForEval(Long userId, String query, int topK, double threshold,
+                                          boolean freezeSideEffects, Boolean exact, Integer hnswEf) {
+        if (query == null || query.isBlank()) {
+            return Collections.emptyList();
+        }
+        MemoryRetrieveQueryVO queryVO = MemoryRetrieveQueryVO.builder()
+                .taskType("LEGACY")
+                .contentMd(query)
+                .build();
+        long start = System.nanoTime();
+        try {
+            return doSearch(userId, queryVO, topK, threshold, freezeSideEffects, exact, hnswEf);
+        } finally {
+            metrics.recordRetrievalDuration(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+        }
+    }
+
     private List<MemoryItem> doSearch(Long userId, MemoryRetrieveQueryVO query, int topK, double threshold) {
+        return doSearch(userId, query, topK, threshold, false, null, null);
+    }
+
+    /** 带评测选项的检索主流程：freeze 冻结副作用，exact/hnswEf 透传向量检索 */
+    private List<MemoryItem> doSearch(Long userId, MemoryRetrieveQueryVO query, int topK, double threshold,
+                                      boolean freeze, Boolean exact, Integer hnswEf) {
         NormalizedMemoryQueryVO normalized = normalizer().normalize(query);
         String semanticQuery = normalized.getSemanticQuery();
         String lexicalQuery = normalized.getLexicalQuery();
@@ -121,18 +152,20 @@ public class MemoryRetriever {
             return Collections.emptyList();
         }
 
-        // Step 0: 搜索缓存（key 拼接 memoryVersion，写入后版本变化自然失效）
+        // Step 0: 搜索缓存（key 拼接 memoryVersion，写入后版本变化自然失效）；freeze 下旁路缓存
         String version = currentMemoryVersion(userId);
         String thresholdToken = String.format(Locale.ROOT, "%.4f", threshold);
         String searchCacheKey = "memory:user:" + userId + ":search:v2:" + normalized.getCacheKeyDigest()
                 + ":topK:" + topK + ":threshold:" + thresholdToken + ":ver:" + version;
-        try {
-            String cached = redisTemplate.opsForValue().get(searchCacheKey);
-            if (cached != null) {
-                return deserializeItems(cached);
+        if (!freeze) {
+            try {
+                String cached = redisTemplate.opsForValue().get(searchCacheKey);
+                if (cached != null) {
+                    return deserializeItems(cached);
+                }
+            } catch (Exception e) {
+                log.debug("Redis search cache read failed, proceeding without cache");
             }
-        } catch (Exception e) {
-            log.debug("Redis search cache read failed, proceeding without cache");
         }
 
         // Step 1: 语义召回（embedding 不可用时为空数组）
@@ -141,11 +174,17 @@ public class MemoryRetriever {
                 : embeddingClient.embed(semanticQuery);
         boolean hasEmbedding = queryEmbedding.length > 0;
         int overFetch = Math.max(topK * DEFAULT_OVER_FETCH_FACTOR, 60);
-        List<ScoredMemory> semanticRanked = hasEmbedding
-                ? vectorStore.search(userId, queryEmbedding, overFetch).stream()
+        List<ScoredMemory> semanticRanked;
+        if (hasEmbedding) {
+            List<ScoredMemory> recalled = (exact != null || hnswEf != null)
+                    ? vectorStore.search(userId, queryEmbedding, overFetch, new MemorySearchOptions(exact, hnswEf))
+                    : vectorStore.search(userId, queryEmbedding, overFetch);
+            semanticRanked = recalled.stream()
                     .filter(s -> s != null && s.content() != null && s.score() >= threshold)
-                    .toList()
-                : Collections.emptyList();
+                    .toList();
+        } else {
+            semanticRanked = Collections.emptyList();
+        }
         metrics.incrementRetrievalRecalled("semantic", semanticRanked.size());
 
         // Step 2: 关键词召回（BM25 sigmoid 归一化），纯关键词降级时过滤弱匹配
@@ -183,20 +222,22 @@ public class MemoryRetriever {
                 .sorted(Comparator.comparingDouble(MemoryItem::score).reversed())
                 .collect(Collectors.toList());
 
-        // Step 7: Reranker 精排（动态 topN = topK）
-        List<MemoryItem> results = rerankIfNeeded(scored, semanticQuery, topK);
+        // Step 7: Reranker 精排（动态 topN = topK）；freeze 下跳过非确定性外部调用
+        List<MemoryItem> results = freeze ? scored : rerankIfNeeded(scored, semanticQuery, topK);
 
         // Step 8: 截取 topK + 异步统计 + 写缓存
         results = results.subList(0, Math.min(topK, results.size()));
-        List<Long> hitIds = results.stream().map(MemoryItem::id).toList();
-        if (!hitIds.isEmpty()) {
-            memoryAccessService.recordAccessAsync(hitIds);
-        }
-        try {
-            redisTemplate.opsForValue().set(searchCacheKey, serializeItems(results),
-                    memoryProperties.getCache().getSearchTtlMinutes(), java.util.concurrent.TimeUnit.MINUTES);
-        } catch (Exception e) {
-            log.debug("Redis search cache write failed");
+        if (!freeze) {
+            List<Long> hitIds = results.stream().map(MemoryItem::id).toList();
+            if (!hitIds.isEmpty()) {
+                memoryAccessService.recordAccessAsync(hitIds);
+            }
+            try {
+                redisTemplate.opsForValue().set(searchCacheKey, serializeItems(results),
+                        memoryProperties.getCache().getSearchTtlMinutes(), java.util.concurrent.TimeUnit.MINUTES);
+            } catch (Exception e) {
+                log.debug("Redis search cache write failed");
+            }
         }
 
         return results;
@@ -218,23 +259,28 @@ public class MemoryRetriever {
     }
 
     public String retrieveFormattedContext(Long userId, MemoryRetrieveQueryVO query, int topK) {
+        return retrieveContextDetail(userId, query, topK).formatted();
+    }
+
+    /** 评测注入上下文：返回 budgeted 明细 + 格式化文本 + token 数（供无关注入率/token 预算评测） */
+    public RetrieveContextResult retrieveContextDetail(Long userId, MemoryRetrieveQueryVO query, int topK) {
         String traceId = MemoryTraceId.next();
         try {
             List<MemoryItem> memories = search(userId, query, topK);
             if (memories.isEmpty()) {
-                return "";
+                return new RetrieveContextResult(List.of(), "", 0);
             }
             String taskType = query != null ? query.getTaskType() : "LEGACY";
             int maxTokens = memoryProperties.getInject().getMaxTokens();
             List<MemoryItem> budgeted = budgetByType(memories, taskType, maxTokens);
             if (budgeted.isEmpty()) {
-                return "";
+                return new RetrieveContextResult(List.of(), "", 0);
             }
             int tokenCount = budgeted.stream().mapToInt(m -> estimateTokens(m.content())).sum();
             log.info("记忆注入 userId={}, traceId={}, taskType={}, memoryIds={}, tokenCount={}",
                     userId, traceId, taskType,
                     budgeted.stream().map(MemoryItem::id).toList(), tokenCount);
-            return formatWithBoundary(budgeted);
+            return new RetrieveContextResult(budgeted, formatWithBoundary(budgeted), tokenCount);
         } finally {
             MemoryTraceId.clear();
         }
@@ -520,6 +566,10 @@ public class MemoryRetriever {
         public MemoryItem(Long id, String content, double score, Double importance) {
             this(id, content, score, importance, null, null, null, null);
         }
+    }
+
+    /** 注入上下文详情：budgeted 明细 + 格式化文本 + token 数 */
+    public record RetrieveContextResult(List<MemoryItem> budgeted, String formatted, int tokenCount) {
     }
 
     private MemoryQueryNormalizer normalizer() {

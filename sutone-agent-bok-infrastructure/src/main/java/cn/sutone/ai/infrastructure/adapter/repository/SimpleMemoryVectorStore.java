@@ -2,6 +2,7 @@ package cn.sutone.ai.infrastructure.adapter.repository;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
+import cn.sutone.ai.domain.agent.model.valobj.MemorySearchOptions;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.infrastructure.dao.IMemoryRecordDao;
 import cn.sutone.ai.infrastructure.dao.po.MemoryRecordPO;
@@ -92,8 +93,19 @@ public class SimpleMemoryVectorStore implements IMemoryVectorStore {
     }
 
     @Override
+    public List<ScoredMemory> search(Long userId, float[] queryEmbedding, int topK, MemorySearchOptions options) {
+        // 内存实现为暴力 cosine，exact/hnsw_ef 语义无差异，忽略选项
+        return search(userId, queryEmbedding, topK);
+    }
+
+    @Override
     public void delete(Long memoryId) {
         store.remove(memoryId);
+    }
+
+    @Override
+    public void removeByUserId(Long userId) {
+        store.entrySet().removeIf(e -> e.getValue().userId().equals(userId));
     }
 
     @Override
