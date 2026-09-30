@@ -1,6 +1,7 @@
 package cn.sutone.ai.infrastructure.metrics;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -29,6 +30,16 @@ public class MemoryMetrics implements IMemoryMetricsPort {
     private final MeterRegistry meterRegistry;
 
     /**
+     * 用于在没有补偿任务时查真实的向量积压数（见 {@link #getVectorSyncPendingCount()}）。
+     *
+     * <p>构造注入而非 {@code @Resource} 字段注入：这个依赖是**必需**的，
+     * 用构造参数能让「忘了注入」在编译期就暴露，而不是在运行时变成一个恒为 0 的假指标——
+     * 本方法此前正是因为「拿不到真实数据就返回 0」而成了事故的一部分，
+     * 不该再留一个同样形态的隐患。</p>
+     */
+    private final IMemoryRepository memoryRepository;
+
+    /**
      * 向量补偿积压供应器。持有强引用，避免 Micrometer Gauge 对 state 对象弱引用导致 Supplier 被 GC。
      */
     private volatile Supplier<? extends Number> vectorSyncPendingSupplier;
@@ -40,8 +51,9 @@ public class MemoryMetrics implements IMemoryMetricsPort {
     /** 派生驳回率（Gauge 实时值，由 {@link #refreshDerivedRates()} 周期刷新） */
     private volatile double extractionRejectRate = 0.0;
 
-    public MemoryMetrics(MeterRegistry meterRegistry) {
+    public MemoryMetrics(MeterRegistry meterRegistry, IMemoryRepository memoryRepository) {
         this.meterRegistry = meterRegistry;
+        this.memoryRepository = memoryRepository;
 
         // 派生率 Gauge：驳回率 = rejected / (accepted + rejected)，首月仅记录不告警
         Gauge.builder("memory.extraction.reject_rate", this, m -> m.extractionRejectRate)
@@ -200,10 +212,32 @@ public class MemoryMetrics implements IMemoryMetricsPort {
         return extractionRejectRate;
     }
 
-    /** 当前向量同步积压数（熔断巡检读取用；未注册 Supplier 时返回 0） */
+    /**
+     * 当前向量同步积压数。
+     *
+     * <p><b>没有 Supplier 时回退到查库，而不是返回 0。</b>此前是返回 0 的，注释写的是
+     * 「未注册 Supplier 时返回 0」——但那把「<b>无人告诉我</b>」和「<b>没有积压</b>」
+     * 当成了同一件事，而这两者的后果天差地别。</p>
+     *
+     * <p>具体事故链（实测复现过）：评测 profile 下 {@code MemoryVectorSyncJob} 被
+     * {@code @ConditionalOnProperty} 关掉（它只在 {@code memory.eval.enabled=false} 时存在），
+     * 于是没有任何人注册 Supplier → 本方法恒返回 0。而 seed 时若向量化失败，
+     * 记忆会被标成 {@code PENDING} 且**永远没有任务来重试**。
+     * 结果是真实积压 1 条、指标报 0 条。</p>
+     *
+     * <p>对评测的破坏是间接但确定的：平台侧 {@code _stage_vector_ready} 的判据就是
+     * 「这个数归零」，它于是立刻放行，hnsw 检索在那条记忆上静默漏召回——
+     * 表现为 Recall 偏低，看起来像检索算法退步。**那个屏障存在的全部意义就是拦住
+     * 这种情况，却因为指标说谎而被绕过去了。**</p>
+     */
     @Override
     public long getVectorSyncPendingCount() {
         Supplier<? extends Number> s = vectorSyncPendingSupplier;
-        return s == null ? 0L : s.get().longValue();
+        if (s != null) {
+            return s.get().longValue();
+        }
+        // 查库有成本，但它只在「补偿任务未运行」时发生（评测实例），
+        // 而那时正需要真实的数字——省这次查询等于报一个假指标。
+        return memoryRepository.countVectorSyncPending();
     }
 }

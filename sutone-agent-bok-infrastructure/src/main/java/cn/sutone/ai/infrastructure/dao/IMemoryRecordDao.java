@@ -217,6 +217,17 @@ public interface IMemoryRecordDao {
     int updateStatus(@Param("id") Long id, @Param("status") String status);
 
     /**
+     * 统计向量同步积压（`vector_status='PENDING'`）的行数。
+     *
+     * <p>这是 `vector.sync.pending` 的**权威来源**。此前该指标只从
+     * {@code MemoryVectorSyncJob} 维护的内存计数读取，而那个任务在评测 profile 下
+     * 被 {@code @ConditionalOnProperty} 关掉了——于是评测实例里这个指标恒为 0，
+     * 无论真实积压是多少。</p>
+     */
+    @Select("SELECT COUNT(*) FROM memory_record WHERE vector_status = 'PENDING' AND is_deleted = 0")
+    long countVectorSyncPending();
+
+    /**
      * P3 治理: 查询 ACTIVE 记忆（供重复聚类按 user_id+type 分组）。
      *
      * <p><b>{@code userId} 参数是安全边界，不是可选优化。</b>

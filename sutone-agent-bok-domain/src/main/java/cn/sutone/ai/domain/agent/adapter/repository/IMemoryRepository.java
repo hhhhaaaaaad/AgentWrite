@@ -85,6 +85,9 @@ public interface IMemoryRepository {
     /** P1-4: 查询待删旧向量 */
     List<MemoryRecordEntity> selectVectorDeletePending();
 
+    /** 向量同步积压行数（`vector_status='PENDING'`）——`vector.sync.pending` 的权威来源 */
+    long countVectorSyncPending();
+
     /** P3 治理: 软标记生命周期状态（先软标记后硬化，只改 status 不物理删除） */
     void updateStatus(Long id, MemoryStatus status);
 

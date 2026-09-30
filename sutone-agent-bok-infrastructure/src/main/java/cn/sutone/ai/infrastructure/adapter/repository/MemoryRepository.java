@@ -250,6 +250,11 @@ public class MemoryRepository implements IMemoryRepository {
                 .collect(Collectors.toList());
     }
 
+    @Override
+    public long countVectorSyncPending() {
+        return memoryRecordDao.countVectorSyncPending();
+    }
+
     private MemoryRecordPO toPO(MemoryRecordEntity entity) {
         return MemoryRecordPO.builder()
                 .id(entity.getId())
