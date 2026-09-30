@@ -190,7 +190,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <!-- version managed by spring-boot-starter-parent -->
                 <configuration>
-                    <skipTests>false</skipTests>
+                    <!-- 不硬编码 skipTests：false 本就是 surefire 默认值。硬编码会导致
+                         -DskipTests=true 对 app 模块失效（命令行 user property 被 pom 覆盖）。
+                         删掉后：默认仍跑测试（CI 意图不变），-DskipTests / -Dmaven.test.skip 均恢复生效。 -->
                     <testFailureIgnore>false</testFailureIgnore>
                     <includes>
                         <include>**/*Test.java</include>

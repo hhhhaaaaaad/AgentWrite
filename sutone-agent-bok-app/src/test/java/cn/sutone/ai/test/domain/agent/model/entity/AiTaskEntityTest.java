@@ -90,6 +90,10 @@ class AiTaskEntityTest {
             AiTaskEntity task = pendingTask();
             String response = "这是一篇关于 Java 的文章...";
 
+            // markSuccess 的前置状态是 RUNNING（见 AiTaskEntity.markSuccess 的守卫），
+            // 因此必须先 startRunning() 走 PENDING -> RUNNING，再标记成功。
+            // 此前直接从 PENDING 调 markSuccess 会抛「只有运行中的任务可以标记成功」。
+            task.startRunning();
             task.markSuccess(response);
 
             assertEquals(AiTaskStatusVO.SUCCESS, task.getStatus());

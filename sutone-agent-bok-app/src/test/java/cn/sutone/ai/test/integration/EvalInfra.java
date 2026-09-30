@@ -29,6 +29,23 @@ public final class EvalInfra {
         return mysqlAvailable() && qdrantAvailable();
     }
 
+    /**
+     * embedding API key 是否可用（非空且非占位值）。
+     *
+     * <p>「质量评测」类测试（MemoryEvaluationTest）必须用真实 embedding 才有意义：
+     * 占位 key（{@code YOUR_SILICONFLOW_API_KEY}）会让 embedding 静默返回空向量，
+     * 语料灌不进、Recall 全 0——那不是检索退步，是环境没配。</p>
+     */
+    public static boolean embeddingAvailable() {
+        String key = System.getenv("MEMORY_EMBEDDING_API_KEY");
+        return key != null && !key.isBlank() && !"YOUR_SILICONFLOW_API_KEY".equals(key);
+    }
+
+    /** Qdrant 与 embedding 均可用（检索质量评测前置条件） */
+    public static boolean qdrantAndEmbeddingAvailable() {
+        return qdrantAvailable() && embeddingAvailable();
+    }
+
     private static boolean reachable(String host, int port) {
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(host, port), 800);

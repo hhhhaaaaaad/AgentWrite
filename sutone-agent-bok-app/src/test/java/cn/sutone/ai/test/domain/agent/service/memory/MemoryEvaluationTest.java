@@ -5,6 +5,7 @@ import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
 import cn.sutone.ai.domain.agent.service.memory.MemoryRetriever;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -18,6 +19,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * 50条语料 + 20条查询 + 6种能力分组
  */
 @SpringBootTest
+// 检索质量评测需要真实 embedding + Qdrant：无环境时跳过而非失败。
+// 此前无门控，缺 vector-size / 无 API key 时会以「Qdrant 400 / 空向量 Recall=0」失败，
+// 与业务无关——不是检索退步，是环境没配（对齐 EvalSeedResetTest 的门控模式）。
+@EnabledIf("cn.sutone.ai.test.integration.EvalInfra#qdrantAndEmbeddingAvailable")
 @DisplayName("记忆系统质量评测")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class MemoryEvaluationTest {

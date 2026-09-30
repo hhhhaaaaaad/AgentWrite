@@ -62,12 +62,17 @@ memory:
     enabled: false
   embedding:
     base-url: ${MEMORY_EMBEDDING_BASE_URL:https://api.siliconflow.cn}
-    api-key: ${MEMORY_EMBEDDING_API_KEY}
+    # 占位默认与 application-dev.yml 对齐：让配置解析不因缺环境变量而失败、启动不崩。
+    # 占位 key 是明显的「未配置」标记，真正调 embedding 时 SiliconFlow 会返回 401，日志可查。
+    api-key: ${MEMORY_EMBEDDING_API_KEY:YOUR_SILICONFLOW_API_KEY}
     model: ${MEMORY_EMBEDDING_MODEL:BAAI/bge-large-zh-v1.5}
     embeddings-path: /v1/embeddings
   vector-store: ${MEMORY_VECTOR_STORE:qdrant}
   qdrant:
     url: ${QDRANT_URL:http://localhost:6333}
+    # 显式给出向量维度（bge-large-zh-v1.5 = 1024），启动不再依赖调 embedding API 探测。
+    # 探测失败（占位 key / 断网）会得到 size=0，导致 Qdrant 建 collection 报 400、应用起不来。
+    vector-size: 1024
     # 评测实例使用专用 Qdrant collection（与业务 agent_memory 隔离）
     collection: agent_memory_eval
   reranker:

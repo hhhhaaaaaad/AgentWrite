@@ -63,6 +63,9 @@ memory:
   vector-store: ${MEMORY_VECTOR_STORE:qdrant}
   qdrant:
     url: ${QDRANT_URL:http://localhost:6333}
+    # 显式给出向量维度（bge-large-zh-v1.5 = 1024），避免启动时调 embedding API 探测。
+    # 探测失败（无 key / 断网）会 size=0，Qdrant 建 collection 报 400（MemoryEvaluationTest 即因此失败）。
+    vector-size: 1024
     collection: agent_memory
   reranker:
     enabled: ${MEMORY_RERANKER_ENABLED:true}

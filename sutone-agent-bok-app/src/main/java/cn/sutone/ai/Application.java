@@ -15,7 +15,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class Application {
 
     public static void main(String[] args) {
-        SpringApplication.run(Application.class);
+        // 必须把 args 传给 SpringApplication：单参重载 run(Class) 等价于 run(Class, new String[0])，
+        // 会丢弃 main 收到的命令行参数，导致 --spring.profiles.active=eval 等一律不生效。
+        SpringApplication.run(Application.class, args);
     }
 
     @Bean("myToolCallbackProvider")
