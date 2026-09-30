@@ -1,6 +1,7 @@
 package cn.sutone.ai.test.domain.agent.service.memory;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
@@ -30,6 +31,7 @@ class MemoryExtractorTest {
     private IMemoryVectorStore vectorStore;
     private MemoryProperties memoryProperties;
     private AiAgentAutoConfigProperties agentProps;
+    private IMemoryMetricsPort metrics;
 
     @BeforeEach
     void setUp() {
@@ -37,6 +39,7 @@ class MemoryExtractorTest {
         vectorStore = mock(IMemoryVectorStore.class);
         memoryProperties = new MemoryProperties();
         agentProps = mock(AiAgentAutoConfigProperties.class);
+        metrics = mock(IMemoryMetricsPort.class);
 
         extractor = new MemoryExtractor();
         injectFields();
@@ -61,6 +64,11 @@ class MemoryExtractorTest {
             var apField = clazz.getDeclaredField("aiAgentAutoConfigProperties");
             apField.setAccessible(true);
             apField.set(extractor, agentProps);
+
+            // P3 可观测改造新增字段：不注入会导致 parseResponse 里 NPE 被 catch 吞掉，解析结果恒为空
+            var metricsField = clazz.getDeclaredField("metrics");
+            metricsField.setAccessible(true);
+            metricsField.set(extractor, metrics);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

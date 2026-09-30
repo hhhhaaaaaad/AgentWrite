@@ -1,6 +1,7 @@
 package cn.sutone.ai.test.domain.agent.service.memory;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
@@ -12,6 +13,7 @@ import cn.sutone.ai.domain.agent.service.memory.MemoryExtractor;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
 import cn.sutone.ai.domain.agent.service.memory.MemoryPersistService;
 import cn.sutone.ai.domain.agent.service.memory.MemoryRetriever;
+import cn.sutone.ai.domain.agent.service.memory.circuit.MemoryCircuitBreaker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -27,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -34,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -56,10 +61,16 @@ class MemoryManagerTest {
     private IMemoryEmbeddingClient embeddingClient;
 
     @Mock
+    private IMemoryMetricsPort metrics;
+
+    @Mock
     private MemoryExtractor memoryExtractor;
 
     @Mock
     private MemoryPersistService memoryPersistService;
+
+    @Mock
+    private MemoryCircuitBreaker memoryCircuitBreaker;
 
     private MemoryManager memoryManager;
 
@@ -73,7 +84,9 @@ class MemoryManagerTest {
         setField("embeddingClient", embeddingClient);
         setField("memoryExtractor", memoryExtractor);
         setField("memoryPersistService", memoryPersistService);
-        setField("injectEnabled", true);
+        setField("metrics", metrics);
+        setField("memoryCircuitBreaker", memoryCircuitBreaker);
+        lenient().when(memoryCircuitBreaker.isDegraded()).thenReturn(false);
     }
 
     private void setField(String name, Object value) throws Exception {
@@ -85,9 +98,9 @@ class MemoryManagerTest {
     private void invokeAdd(Long userId, Long agentId, String sessionId,
                            List<Map<String, String>> messages) throws Exception {
         Method m = MemoryManager.class.getDeclaredMethod("add",
-                Long.class, Long.class, String.class, List.class, String.class);
+                Long.class, Long.class, String.class, Long.class, List.class, String.class);
         m.setAccessible(true);
-        m.invoke(memoryManager, userId, agentId, sessionId, messages, "trace-test");
+        m.invoke(memoryManager, userId, agentId, sessionId, null, messages, "trace-test");
     }
 
     @Test
@@ -159,6 +172,23 @@ class MemoryManagerTest {
         }
         // 持久化委托给 MemoryPersistService（向量异步同步，不再直接 upsert）
         verify(memoryPersistService).persistSurvivors(eq(1L), eq("s1"), anyString(), anyList(), anyList(), anyList());
+    }
+
+    @Test
+    @DisplayName("AW-3: addDirect 撞 uk_user_hash 唯一索引转 existed，复用已有 id，不写向量")
+    void shouldReturnExistedOnDuplicateHash() {
+        when(memoryRepository.insert(any(MemoryRecordEntity.class)))
+                .thenThrow(new DuplicateKeyException("uk_user_hash"));
+        MemoryRecordEntity existing = MemoryRecordEntity.create(
+                42L, 1L, "fact", "用户偏好 Java", "hash", "eval-seed");
+        when(memoryRepository.selectByUserIdAndHash(eq(1L), anyString())).thenReturn(existing);
+
+        MemoryManager.AddDirectResult result = memoryManager.addDirect(1L, MemoryTypeVO.FACT, "用户偏好 Java");
+
+        assertFalse(result.inserted());
+        assertEquals(42L, result.id());
+        verify(vectorStore, never()).upsert(anyLong(), anyLong(), any(float[].class), anyString(), anyString());
+        verify(embeddingClient, never()).embed(anyString());
     }
 
     @Test

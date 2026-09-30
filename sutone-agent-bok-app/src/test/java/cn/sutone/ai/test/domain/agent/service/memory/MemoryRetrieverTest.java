@@ -1,6 +1,7 @@
 package cn.sutone.ai.test.domain.agent.service.memory;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.adapter.repository.IRerankerClient;
@@ -42,6 +43,7 @@ class MemoryRetrieverTest {
     private RedisTemplate<String, String> redisTemplate;
     private ValueOperations<String, String> valueOps;
     private MemoryAccessService memoryAccessService;
+    private IMemoryMetricsPort metrics;
 
     @SuppressWarnings("unchecked")
     @BeforeEach
@@ -53,6 +55,7 @@ class MemoryRetrieverTest {
         redisTemplate = mock(RedisTemplate.class);
         valueOps = mock(ValueOperations.class);
         memoryAccessService = mock(MemoryAccessService.class);
+        metrics = mock(IMemoryMetricsPort.class);
         memoryProperties = new MemoryProperties();
 
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
@@ -98,6 +101,11 @@ class MemoryRetrieverTest {
             var accessField = clazz.getDeclaredField("memoryAccessService");
             accessField.setAccessible(true);
             accessField.set(retriever, memoryAccessService);
+
+            // P3 可观测改造新增字段：不注入会导致 search() 里 recordRetrievalDuration NPE
+            var metricsField = clazz.getDeclaredField("metrics");
+            metricsField.setAccessible(true);
+            metricsField.set(retriever, metrics);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

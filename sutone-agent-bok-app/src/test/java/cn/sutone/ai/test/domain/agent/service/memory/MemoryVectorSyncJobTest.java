@@ -1,6 +1,7 @@
 package cn.sutone.ai.test.domain.agent.service.memory;
 
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryEmbeddingClient;
+import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
@@ -37,6 +38,10 @@ class MemoryVectorSyncJobTest {
     @Mock
     private IMemoryEmbeddingClient embeddingClient;
 
+    /** P3 可观测改造新增字段：不注入会导致 syncOne/deleteOne 里 NPE */
+    @Mock
+    private IMemoryMetricsPort metrics;
+
     private MemoryVectorSyncJob job;
 
     @BeforeEach
@@ -45,6 +50,7 @@ class MemoryVectorSyncJobTest {
         setField("memoryRepository", memoryRepository);
         setField("vectorStore", vectorStore);
         setField("embeddingClient", embeddingClient);
+        setField("metrics", metrics);
         setField("maxRetry", 5);
         setField("baseBackoffMs", 1000L);
     }
