@@ -43,7 +43,9 @@ build/
 /sutone-agent-bok-app/.local-config
 
 ### Agent 工具运行态（会话状态、转录、缓存——每次运行都会变化，不入库）###
-/.omc/
+# 用 ** 而非前导 / ——后者只锚定仓库根目录，会让 docs/dev-ops/.omc/ 这类
+# 嵌套实例漏网（实际漏过一次）。
+**/.omc/
 /.mybatis/
 
 ### 嵌套的独立项目（不属于本仓库，应独立建仓）###
@@ -51,4 +53,16 @@ build/
 
 ### 调试残留 ###
 /utputFormat
+
+### docs/dev-ops 下容器的运行态数据（启动后自动生成，重新 seed 即可重建）###
+# RocketMQ：broker/conf/*.conf 是**配置**要入库；store / logs / namesrv 都是运行态。
+# 不排除的话每次 RocketMQ 重启都会改写这些文件，工作区永远显示「有改动」。
+/docs/dev-ops/rocketmq/broker/store/
+/docs/dev-ops/rocketmq/broker/logs/
+/docs/dev-ops/rocketmq/namesrv/
+# Qdrant 向量存储目录
+/docs/dev-ops/qdrant_storage/
+# JVM 崩溃转储（内存不足时由 JVM 写在进程工作目录）
+hs_err_pid*.log
+replay_pid*.log
 
