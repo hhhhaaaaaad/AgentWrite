@@ -36,6 +36,7 @@ public class AgentWorkflowNode extends AbstractArmorySupport {
         AiAgentConfigTableVO aiAgentConfigTableVO = requestParameter.getAiAgentConfigTableVO();
         List<AiAgentConfigTableVO.Module.AgentWorkflow> agentWorkflows = aiAgentConfigTableVO.getModule().getAgentWorkflows();
 
+        // 如果加载完了之后 直接路由
         if (null == agentWorkflows || agentWorkflows.isEmpty() || dynamicContext.getCurrentStepIndex() >= agentWorkflows.size()) {
             // 设置结果值
             dynamicContext.setCurrentAgentWorkflow(null);
@@ -43,6 +44,7 @@ public class AgentWorkflowNode extends AbstractArmorySupport {
             return router(requestParameter, dynamicContext);
         }
 
+        // 没加载完· 继续路由
         dynamicContext.setCurrentAgentWorkflow(agentWorkflows.get(dynamicContext.getCurrentStepIndex()));
 
         // 步骤值增加

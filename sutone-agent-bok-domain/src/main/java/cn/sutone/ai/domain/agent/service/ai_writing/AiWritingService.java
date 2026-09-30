@@ -110,7 +110,7 @@ public class AiWritingService implements IAiWritingService {
     }
 
     @Override
-    public AiTaskEntity submitTask(Long userId, Long draftId, String taskTypeCode, Map<String, Object> promptParams, Boolean enableIllustration) {
+    public AiTaskEntity  submitTask(Long userId, Long draftId, String taskTypeCode, Map<String, Object> promptParams, Boolean enableIllustration) {
         // 1. redis限流器限流 每用户每分钟最多 5 次 AI 调用（快捷操作）
         if (!rateLimitService.tryAcquire(userId)) {
             throw new AppException(ResponseCode.E0001.getCode(), "AI 请求过于频繁，请稍后再试");
