@@ -1,3 +1,7 @@
+-- 显式声明目标库：docker-entrypoint-initdb.d 调用 mysql 客户端时不带默认库，
+-- 缺此行会以 ERROR 1046 失败，并中断整轮初始化（容器退出，后续脚本全部不执行）。
+USE `sutone_agent_bok`;
+
 -- Phase 15: 修复 chat_message.content 长度不足导致的 Data too long 报错
 -- 背景：AI 写作快捷操作会把 analyst+generator+reviewer 多 Agent 的完整输出拼接后作为
 --       一条 assistant 消息持久化，reviewer 改为结构化 JSON 块后体量更大，

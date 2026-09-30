@@ -1,3 +1,7 @@
+-- 显式声明目标库：docker-entrypoint-initdb.d 调用 mysql 客户端时不带默认库，
+-- 缺此行会以 ERROR 1046 失败，并中断整轮初始化（容器退出，后续脚本全部不执行）。
+USE `sutone_agent_bok`;
+
 -- ============================================================
 -- Phase20: 评测 fencing 权威态（zombie 防护）
 -- 说明：per-config 命名空间（eval_user_id）的权威 fencing 状态。

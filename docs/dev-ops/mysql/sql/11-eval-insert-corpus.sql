@@ -1,3 +1,7 @@
+-- 显式声明目标库：docker-entrypoint-initdb.d 调用 mysql 客户端时不带默认库，
+-- 缺此行会以 ERROR 1046 失败，并中断整轮初始化（容器退出，后续脚本全部不执行）。
+USE `sutone_agent_bok`;
+
 -- 评测语料插入脚本（50条，用户ID=9999）
 DELETE FROM memory_record WHERE user_id = 9999 AND is_deleted = 0;
 

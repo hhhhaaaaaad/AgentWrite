@@ -1,3 +1,7 @@
+-- 显式声明目标库：docker-entrypoint-initdb.d 调用 mysql 客户端时不带默认库，
+-- 缺此行会以 ERROR 1046 失败，并中断整轮初始化（容器退出，后续脚本全部不执行）。
+USE `sutone_agent_bok`;
+
 -- V3: 用户自定义模型配置（多租户架构）
 CREATE TABLE `user_model_config` (
   `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
