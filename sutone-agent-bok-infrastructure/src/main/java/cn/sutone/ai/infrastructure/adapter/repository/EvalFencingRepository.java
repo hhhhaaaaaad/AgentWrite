@@ -5,26 +5,50 @@ import cn.sutone.ai.domain.agent.model.exception.MemoryEvalFencingException;
 import cn.sutone.ai.infrastructure.dao.IEvalFencingDao;
 import cn.sutone.ai.infrastructure.dao.po.EvalFencingPO;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 评测 fencing 权威态实现。
  *
  * <p>acquire 是事务内读改写：{@code SELECT ... FOR UPDATE} → 无行 INSERT / 有行对账后 +1，
  * 隔离级别 pin REPEATABLE READ（锁定读始终读到最新已提交，用于并发抢占的正确对账）。</p>
+ *
+ * <p>并发抢占空表时，多个事务的 {@code SELECT ... FOR UPDATE} + INSERT 会在 MySQL 上
+ * 锁竞争触发死锁（{@code DeadlockLoserDataAccessException}），这不是语义错误而是锁序问题，
+ * 因此 acquire 用编程式事务（{@link TransactionTemplate}）在<b>事务外</b>随机退避重试，
+ * 让 MySQL 检测并回滚的那个事务重试后收敛——最终仍只有一个 acquire 成功、其余对账返回 conflict。</p>
  */
 @Slf4j
 @Repository
 public class EvalFencingRepository implements IEvalFencingRepository {
 
+    /** 死锁重试上限：并发抢占空表时锁竞争死锁，重试几次即可收敛 */
+    private static final int MAX_ACQUIRE_RETRIES = 5;
+
     @Resource
     private IEvalFencingDao evalFencingDao;
+
+    @Resource
+    private PlatformTransactionManager transactionManager;
+
+    private TransactionTemplate txTemplate;
+
+    @PostConstruct
+    void init() {
+        this.txTemplate = new TransactionTemplate(transactionManager);
+        this.txTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    }
 
     @Override
     public EvalFencingState get(Long evalUserId) {
@@ -35,8 +59,30 @@ public class EvalFencingRepository implements IEvalFencingRepository {
     }
 
     @Override
-    @Transactional(isolation = Isolation.REPEATABLE_READ)
     public AcquireResult acquire(Long evalUserId, long expectedVersion, String newRunId) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return txTemplate.execute(status -> doAcquire(evalUserId, expectedVersion, newRunId));
+            } catch (DeadlockLoserDataAccessException e) {
+                if (attempt >= MAX_ACQUIRE_RETRIES - 1) {
+                    log.error("fencing acquire 死锁重试耗尽: evalUserId={}", evalUserId, e);
+                    throw e;
+                }
+                log.warn("fencing acquire 死锁，随机退避重试 {}/{}: evalUserId={}",
+                        attempt + 1, MAX_ACQUIRE_RETRIES, evalUserId);
+                try {
+                    // 随机退避打散多个并发重试的时序，避免再次同时撞锁
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(1, 20));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    /** 事务内读改写：{@code SELECT ... FOR UPDATE} → 无行 INSERT / 有行对账后 +1 */
+    private AcquireResult doAcquire(Long evalUserId, long expectedVersion, String newRunId) {
         EvalFencingPO row = evalFencingDao.selectForUpdate(evalUserId);
         if (row == null) {
             try {
