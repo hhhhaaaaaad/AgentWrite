@@ -41,3 +41,14 @@ build/
 /.idea/
 /.mvn/
 /sutone-agent-bok-app/.local-config
+
+### Agent 工具运行态（会话状态、转录、缓存——每次运行都会变化，不入库）###
+/.omc/
+/.mybatis/
+
+### 嵌套的独立项目（不属于本仓库，应独立建仓）###
+/AgentZoo-Animals/
+
+### 调试残留 ###
+/utputFormat
+

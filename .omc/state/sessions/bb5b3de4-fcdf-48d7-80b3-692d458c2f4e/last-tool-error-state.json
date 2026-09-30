@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"python -c \\\"import litellm; print('litellm', litellm.__version__)\\\" 2>&1\",\"description\":\"Verify litellm import and version\"}",
-  "error": "Exit code 1\nTraceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\n  File \"D:\\anaconda\\Lib\\site-packages\\litellm\\__init__.py\", line 2437, in __getattr__\r\n    raise AttributeError(f\"module {__name__!r} has no attribute {name!r}\")\r\nAttributeError: module 'litellm' has no attribute '__version__'",
-  "timestamp": "2026-09-29T03:44:47.177Z",
-  "retry_count": 1
-}

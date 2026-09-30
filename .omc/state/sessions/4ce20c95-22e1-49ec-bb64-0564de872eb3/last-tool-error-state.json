@@ -1,7 +1,0 @@
-{
-  "tool_name": "Read",
-  "tool_input_preview": "{\"file_path\":\"D:\\\\java\\\\scaffold\\\\AgentWrite\\\\sutone-agent-bok-domain\\\\src\\\\main\\\\java\\\\cn\\\\sutone\\\\ai\\\\domain\\\\agent\\\\service\\\\memory\\\\IMemoryVectorStore.java\"}",
-  "error": "File does not exist. Note: your current working directory is D:\\java\\scaffold\\AgentWrite.",
-  "timestamp": "2026-09-28T16:28:39.188Z",
-  "retry_count": 1
-}

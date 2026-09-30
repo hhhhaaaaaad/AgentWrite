@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"echo \\\"=== 环境变量代理 ===\\\" && echo \\\"http_proxy=$http_proxy https_proxy=$https_proxy HTTP_PROXY=$HTTP_PROXY HTTPS_PROXY=$HTTPS_PROXY\\\" && echo \\\"=== Windows 系统代理 ===\\\" && reg query \\\"HKCU\\\\So...",
-  "error": "Exit code 1\n=== 环境变量代理 ===\nhttp_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY=\n=== Windows 系统代理 ===",
-  "timestamp": "2026-08-30T05:44:53.352Z",
-  "retry_count": 3
-}
