@@ -64,15 +64,51 @@ java -jar sutone-agent-bok-app/target/sutone-agent-bok-app.jar
 
 > eval 端口为 **8092**（`application-eval.yml` 的 `server.port`）。
 
-## 5. 验证
+## 5. 签发评测凭据（role=EVAL token）
+
+`/api/v1/eval/**` 要求 `hasRole("EVAL")`，而**系统里没有在线签发 EVAL token 的路径**
+（`AuthController.login` 调的是二参 `generateToken`，role 恒为 null）。
+评测平台（eval-platform）需要一个长期凭据，用这个离线 CLI 签：
+
+```bash
+cd E:/java/AgentWrite
+MAVEN_OPTS="-Xmx640m -XX:MaxMetaspaceSize=320m \
+  -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8" \
+  mvn -B -q -pl sutone-agent-bok-trigger exec:java \
+    -Dexec.mainClass=cn.sutone.ai.trigger.security.EvalTokenCli \
+    -Dexec.args="--expires-days 30 --format env"
+```
+
+输出形如 `JAVA_EVAL_TOKEN=eyJ...`，把它写进 **eval-platform 的 `backend/.env`**：
+
+```
+JAVA_EVAL_TOKEN=<上一步的输出>
+```
+
+要点：
+
+- **`-Dfile.encoding=UTF-8` 必须带**：Windows 控制台默认 GBK，缺这个参数时
+  CLI 的中文提示会输出成乱码（token 本身是 ASCII，不受影响）。
+- **不是 HTTP 端点**：签发工具做成 CLI 是刻意的——一个「按需签发任意角色 token」
+  的端点等于在认证边界上开后门，它得再做一套鉴权；而 EVAL 凭据的使用者是运维本人、
+  频率是「部署时签一次」，CLI 用零攻击面换到同样的能力。
+- **不要写死 token 到代码或提交进仓库**：它等同密码。`.env` 已被 `.gitignore` 排除。
+- **轮换**：重新签一个 → 更新 `.env` → 重启平台进程。旧 token 会随过期自然失效，
+  无需吊销。
+- **密钥必须一致**：CLI 读 `JWT_SECRET` 环境变量，未设置时用配置文件里的默认值
+  `sutone-agent-bok-jwt-secret-key-2026`。用默认密钥时 CLI 会打印告警——
+  该密钥在仓库里公开可读，据此签出的 token 对任何读过仓库的人都有效，仅限本地。
+
+## 6. 验证
 
 ```bash
 # 无 token 应返回 403（Spring Security 拦截）
 curl --noproxy '*' -i http://127.0.0.1:8092/api/v1/eval/params
 
-# 带 role=EVAL 的 JWT（放 Cookie，不是 Authorization header）后应返回 0000 + 业务数据
-# 自签方式：HS256，secret 为 jwt.secret（默认 sutone-agent-bok-jwt-secret-key-2026，
-# 若设了 JWT_SECRET 环境变量则用该值），claim 含 role=EVAL，放 Cookie: token=<jwt>
+# 带 token 应返回 0000 + 业务数据。
+# 两条通道都支持：Cookie（浏览器）与 Authorization: Bearer（机器调用方，eval-platform 走这条）
+curl --noproxy '*' -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8092/api/v1/eval/params
 ```
 
 > 提示：本机系统代理（注册表指向本机 7897）会劫持 localhost 请求返回 502，
@@ -86,3 +122,10 @@ curl --noproxy '*' -i http://127.0.0.1:8092/api/v1/eval/params
 | `--spring.profiles.active=eval` 不生效 | 启动类漏传 args | 已修复 |
 | `-DskipTests` 无效 | app 模块 pom 硬编码 skipTests=false | 已修复 |
 | 全新环境无 eval 库 | 无建库脚本 | 已补 21- 脚本 |
+| 评测平台带合法 token 仍 403（缺口 1） | `JwtAuthenticationFilter` 只读 `token` Cookie，不认 `Authorization: Bearer` | 已支持 Bearer（Cookie 优先） |
+| 任何 token 都过不了 `hasRole("EVAL")`（缺口 2） | 全仓唯一签发点 `AuthController.login` 调二参 `generateToken`，role 恒为 null | 已补 `EvalTokenCli` 离线签发 |
+
+> **这两个缺口是同一类问题**：单看每一侧都「正常」——浏览器登录一直好用、
+> 评测端点权限配置也写对了——问题只在**跨进程调用**时才合流暴露。
+> 纯 mock 的测试看不见（两个缺口都在真实 HTTP 与真实 Spring Security 里），
+> 这也是「必须真跑一次端到端」最直接的论据。
