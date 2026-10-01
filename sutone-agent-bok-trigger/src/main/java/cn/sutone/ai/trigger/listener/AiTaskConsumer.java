@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,9 +28,40 @@ import org.springframework.stereotype.Component;
  *
  * <p>幂等保证：即使同一条消息被投递多次（即时投递 + 定时兜底可能重复），
  * claimTask 的 CAS 机制保证只有一个 Consumer 能成功执行。</p>
+ *
+ * <h3>为什么评测实例必须关掉它</h3>
+ *
+ * <p>评测实例（{@code memory.eval.enabled=true}）跑在专用库 {@code sutone_agent_bok_eval} 上，
+ * 与业务库物理隔离。但 RocketMQ 的消费组**没有按 profile 区分**：
+ * {@code ai-writing.mq.consumer-group} 默认是 {@code ai-writing-worker-group}，
+ * 评测 profile 并未覆盖它。于是业务实例与评测实例若同时启动，两者会**加入同一个消费组**，
+ * RocketMQ 会把业务写作消息**负载均衡**地投给其中之一。</p>
+ *
+ * <p>后果不是「重复执行」，而更隐蔽——消息被投到评测实例时：</p>
+ * <ol>
+ *   <li>评测实例调 {@link IAiTaskRepository#claimTask} **抢占成功**（CAS 在评测库里改状态）；</li>
+ *   <li>评测实例执行完整写作编排，产物写进**评测库**，配图/模型调用也都真实发生；</li>
+ *   <li>业务实例再收到同一条消息时 {@code affectedRows=0}，按上面的幂等约定
+ *       **判定为「已被其他 Consumer 实例抢占，直接跳过」**。</li>
+ * </ol>
+ *
+ * <p>净效果：这条业务任务**在错误的数据库里被执行**，而业务实例认为它已被处理；
+ * 且日志里两边的说法都「正常」。这与评测平台本身在别处反复警惕的
+ * **静默降级**是同一形态——最危险的地方在于它看起来什么都没坏。</p>
+ *
+ * <p>关掉它的方式沿用本仓库既有的「评测实例标记」约定
+ * （{@code MemoryVectorSyncJob}、{@code MemoryGovernanceJob} 用的是同一个注解与属性）：
+ * {@code matchIfMissing=true} 保证**未显式配置时默认开启**——即业务环境不受影响，
+ * 只有显式声明 {@code memory.eval.enabled=true} 的评测实例才会关闭它。</p>
+ *
+ * <p>注意属性名 {@code memory.eval.*} 名义上属于「记忆」子系统，被用来关一个「写作」
+ * 消费者是**语义上的拉伸**。之所以仍这么写，是因为该属性在本仓库里实际承担的角色是
+ * 「本实例是不是评测实例」，已有三处这么用；另起一个新属性会让两套约定并存，
+ * 反而更容易漏掉某一处。若将来要正名，应当三处一起改成一个中性的名字。</p>
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "memory.eval.enabled", havingValue = "false", matchIfMissing = true)
 @RocketMQMessageListener(
         topic = "${ai-writing.mq.topic:ai-writing-task}",
         consumerGroup = "${ai-writing.mq.consumer-group:ai-writing-worker-group}",
