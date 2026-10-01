@@ -73,6 +73,10 @@ build/
 /docs/dev-ops/rocketmq/namesrv/
 # Qdrant 向量存储目录
 /docs/dev-ops/qdrant_storage/
+# 冷启动/迁移前的 mysqldump 备份。**刻意不入库**：它是操作前的保险，
+# 不是产物——入库只会让仓库随每次演练膨胀，且里面含整库数据（含用户表）。
+# 需要长期留存的备份应放到仓库之外的对象存储，而不是这里。
+/docs/dev-ops/backup/
 # JVM 崩溃转储（内存不足时由 JVM 写在进程工作目录）
 hs_err_pid*.log
 replay_pid*.log
