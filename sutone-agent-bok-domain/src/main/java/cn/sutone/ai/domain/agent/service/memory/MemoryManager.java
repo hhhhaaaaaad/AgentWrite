@@ -277,7 +277,9 @@ public class MemoryManager {
                 .taskType("LEGACY")
                 .contentMd(queryContext)
                 .build();
-        return memoryRetriever.retrieveContextDetail(userId, queryVO, topK);
+        // 评测注入必须冻结副作用：否则 recordAccessAsync 会改写 access_count/last_accessed_at/importance，
+        // 这些值喂回 finalScore 后使后续 query 的注入集合「查询无关」（#75）。
+        return memoryRetriever.retrieveContextDetail(userId, queryVO, topK, true);
     }
 
     /** 为 Agent prompt 格式化记忆上下文 */

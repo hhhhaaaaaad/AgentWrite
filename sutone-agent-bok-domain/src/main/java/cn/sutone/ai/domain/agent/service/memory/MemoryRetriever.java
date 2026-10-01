@@ -264,9 +264,23 @@ public class MemoryRetriever {
 
     /** 评测注入上下文：返回 budgeted 明细 + 格式化文本 + token 数（供无关注入率/token 预算评测） */
     public RetrieveContextResult retrieveContextDetail(Long userId, MemoryRetrieveQueryVO query, int topK) {
+        return retrieveContextDetail(userId, query, topK, false);
+    }
+
+    /**
+     * 注入上下文详情（可冻结副作用）。
+     *
+     * <p><b>{@code freeze} 的语义与检索端点一致</b>：{@code true} 时跳过搜索缓存读写、rerank 精排、
+     * 以及 {@code recordAccessAsync} 的访问/重要性回写。评测注入（{@code retrieveContextForEval}）
+     * 必须用 {@code freeze=true}，否则第一次注入会改写命中记忆的
+     * {@code access_count}/{@code last_accessed_at}/{@code importance}，这些值又喂回
+     * {@code finalScore} 的 recency/importance 因子，使后续 query 无论查什么都返回同一批
+     * 刚被访问过的记忆——注入集合变成「查询无关」，无关注入率失真（#75）。</p>
+     */
+    public RetrieveContextResult retrieveContextDetail(Long userId, MemoryRetrieveQueryVO query, int topK, boolean freeze) {
         String traceId = MemoryTraceId.next();
         try {
-            List<MemoryItem> memories = search(userId, query, topK);
+            List<MemoryItem> memories = doSearch(userId, query, topK, DEFAULT_THRESHOLD, freeze, null, null);
             if (memories.isEmpty()) {
                 return new RetrieveContextResult(List.of(), "", 0);
             }

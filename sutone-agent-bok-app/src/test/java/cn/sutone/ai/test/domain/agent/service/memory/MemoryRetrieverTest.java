@@ -371,6 +371,60 @@ class MemoryRetrieverTest {
         }
 
         @Test
+        @DisplayName("评测注入上下文（freeze=true）不写 access/importance：否则后续 query 塌缩到同一注入集合")
+        void retrieveContextDetailFreezeSkipsAccessSideEffect() {
+            float[] embedding = new float[]{0.1f, 0.2f};
+            when(embeddingClient.embed(anyString())).thenReturn(embedding);
+            ScoredMemory sm = new ScoredMemory(1L, "用户是Java工程师", 0.85, 0.5, LocalDateTime.now(), "hash1");
+            when(vectorStore.search(eq(1L), any(), anyInt())).thenReturn(List.of(sm));
+            when(memoryRepository.fulltextSearch(anyLong(), anyString(), anyInt())).thenReturn(Collections.emptyList());
+            MemoryRecordEntity entity = MemoryRecordEntity.create(1L, 1L, "fact", "用户是Java工程师", "hash1", "s1");
+            when(memoryRepository.queryByIds(anyList())).thenReturn(List.of(entity));
+
+            MemoryRetrieveQueryVO query = MemoryRetrieveQueryVO.builder()
+                    .taskType("LEGACY")
+                    .contentMd("Java")
+                    .build();
+
+            MemoryRetriever.RetrieveContextResult result = retriever.retrieveContextDetail(1L, query, 5, true);
+
+            assertFalse(result.budgeted().isEmpty());
+            // 关键回归（#75）：freeze=true 不得写 access——否则 recordAccessAsync 会把
+            // 命中记忆的 access_count/last_accessed_at/importance 改了，这些值反过来喂给
+            // finalScore 的 recency/importance 因子，使后续 query 无论查什么都返回同一批
+            // 被刚访问过的记忆（「查询无关」的注入集合）。评测检索必须可复现。
+            verify(memoryAccessService, never()).recordAccessAsync(anyList());
+            // freeze 路径也不该读写搜索缓存（缓存会让不同 query 互相污染）。
+            // 注意只断言 search:v2 键：currentMemoryVersion 会无条件读 version 键，那是无害的。
+            verify(valueOps, never()).get(startsWith("memory:user:1:search:v2:"));
+            verify(valueOps, never()).set(startsWith("memory:user:1:search:v2:"), anyString(), anyLong(), any(TimeUnit.class));
+        }
+
+        @Test
+        @DisplayName("非评测注入上下文（freeze 默认 false）仍写 access：保留真实用户访问的副作用")
+        void retrieveContextDetailNonFreezeStillWritesAccess() {
+            float[] embedding = new float[]{0.1f, 0.2f};
+            when(embeddingClient.embed(anyString())).thenReturn(embedding);
+            ScoredMemory sm = new ScoredMemory(1L, "用户是Java工程师", 0.85, 0.5, LocalDateTime.now(), "hash1");
+            when(vectorStore.search(eq(1L), any(), anyInt())).thenReturn(List.of(sm));
+            when(memoryRepository.fulltextSearch(anyLong(), anyString(), anyInt())).thenReturn(Collections.emptyList());
+            MemoryRecordEntity entity = MemoryRecordEntity.create(1L, 1L, "fact", "用户是Java工程师", "hash1", "s1");
+            when(memoryRepository.queryByIds(anyList())).thenReturn(List.of(entity));
+
+            MemoryRetrieveQueryVO query = MemoryRetrieveQueryVO.builder()
+                    .taskType("LEGACY")
+                    .contentMd("Java")
+                    .build();
+
+            MemoryRetriever.RetrieveContextResult result = retriever.retrieveContextDetail(1L, query, 5);
+
+            assertFalse(result.budgeted().isEmpty());
+            // 非评测路径（agent prompt 真实注入）应保留访问副作用——这是 access_count/importance
+            // 动态更新的入口，不能顺手关掉。
+            verify(memoryAccessService).recordAccessAsync(argThat(ids -> ids.contains(1L)));
+        }
+
+        @Test
         @DisplayName("任务化注入应按类型预算 token 并用 <memory_context> 包裹")
         void shouldBudgetTokensAndWrapBoundary() {
             float[] embedding = new float[]{0.1f, 0.2f};
