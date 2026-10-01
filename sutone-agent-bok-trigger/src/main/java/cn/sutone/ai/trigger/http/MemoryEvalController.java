@@ -117,7 +117,9 @@ public class MemoryEvalController {
                     continue;
                 }
                 items.add(new MemoryEvalGuardService.SeedItem(
-                        MemoryTypeVO.fromCode(item.getType()), item.getContent()));
+                        MemoryTypeVO.fromCode(item.getType()), item.getContent(),
+                        item.getSubject(), item.getPredicate(), item.getValue(),
+                        item.getConfidence(), item.getExpireTime()));
             }
 
             MemoryEvalGuardService.SeedOutcome outcome =

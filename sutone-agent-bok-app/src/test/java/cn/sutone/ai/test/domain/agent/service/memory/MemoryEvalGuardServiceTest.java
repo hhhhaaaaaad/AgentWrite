@@ -13,12 +13,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -209,5 +211,83 @@ class MemoryEvalGuardServiceTest {
         assertEquals(0, outcome.existed());
         verify(memoryRepository, never()).insert(any(MemoryRecordEntity.class));
         verifyNoInteractions(vectorStore, embeddingClient);
+    }
+
+    // ==================== seed 治理可选字段（P1-6 三类任务可达） ====================
+
+    @Test
+    @DisplayName("seed 显式传治理字段：覆写 subject/predicate/value/confidence/expireTime")
+    void seedAppliesGovernanceFieldsToInsertedRecord() {
+        when(memoryRepository.selectByUserIdAndHash(eq(USER), anyString())).thenReturn(null);
+        when(memoryRepository.insert(any(MemoryRecordEntity.class))).thenReturn(11L);
+        when(embeddingClient.embed(anyString())).thenReturn(new float[]{0.2f});
+
+        guardService.seedGuarded(USER, RUN_ID, 1L,
+                List.of(new MemoryEvalGuardService.SeedItem(MemoryTypeVO.FACT, "结构化语料",
+                        "用户", "tech_stack", "Java 17", 0.85, "2020-01-01T00:00:00")));
+
+        ArgumentCaptor<MemoryRecordEntity> captor = ArgumentCaptor.forClass(MemoryRecordEntity.class);
+        verify(memoryRepository).insert(captor.capture());
+        MemoryRecordEntity record = captor.getValue();
+        assertEquals("用户", record.getSubject());
+        assertEquals("tech_stack", record.getPredicate());
+        assertEquals("Java 17", record.getValue());
+        assertEquals(0.85, record.getConfidence(), 0.0001);
+        // 显式传过去时刻：必须覆写为显式值（expired 任务可达的前提），而不是默认推导。
+        assertEquals(LocalDateTime.of(2020, 1, 1, 0, 0), record.getExpireTime());
+    }
+
+    @Test
+    @DisplayName("seed 不传治理字段：字段为 null、fact 的 expireTime 为 null（与原行为逐位一致）")
+    void seedWithoutGovernanceFieldsKeepsNullDefaults() {
+        when(memoryRepository.selectByUserIdAndHash(eq(USER), anyString())).thenReturn(null);
+        when(memoryRepository.insert(any(MemoryRecordEntity.class))).thenReturn(12L);
+        when(embeddingClient.embed(anyString())).thenReturn(new float[]{0.2f});
+
+        guardService.seedGuarded(USER, RUN_ID, 1L,
+                List.of(new MemoryEvalGuardService.SeedItem(MemoryTypeVO.FACT, "纯内容语料")));
+
+        ArgumentCaptor<MemoryRecordEntity> captor = ArgumentCaptor.forClass(MemoryRecordEntity.class);
+        verify(memoryRepository).insert(captor.capture());
+        MemoryRecordEntity record = captor.getValue();
+        assertNull(record.getSubject());
+        assertNull(record.getPredicate());
+        assertNull(record.getValue());
+        assertNull(record.getConfidence());
+        // fact 默认永久：defaultExpireTime 推导为 null，未被覆写。
+        assertNull(record.getExpireTime());
+    }
+
+    @Test
+    @DisplayName("seed 不传 expireTime 的 preference：expireTime 仍按 defaultExpireTime 推导为未来")
+    void seedPreferenceWithoutExpireTimeKeepsFutureDefault() {
+        when(memoryRepository.selectByUserIdAndHash(eq(USER), anyString())).thenReturn(null);
+        when(memoryRepository.insert(any(MemoryRecordEntity.class))).thenReturn(13L);
+        when(embeddingClient.embed(anyString())).thenReturn(new float[]{0.2f});
+
+        guardService.seedGuarded(USER, RUN_ID, 1L,
+                List.of(new MemoryEvalGuardService.SeedItem(MemoryTypeVO.PREFERENCE, "偏好语料")));
+
+        ArgumentCaptor<MemoryRecordEntity> captor = ArgumentCaptor.forClass(MemoryRecordEntity.class);
+        verify(memoryRepository).insert(captor.capture());
+        MemoryRecordEntity record = captor.getValue();
+        assertNotNull(record.getExpireTime(), "preference 未显式传 expireTime 时应保留 now+180 天的推导");
+        assertTrue(record.getExpireTime().isAfter(LocalDateTime.now()));
+    }
+
+    @Test
+    @DisplayName("seed 带治理字段时 fencing 校验失败：仍绝不插入（守卫不被扩展字段绕过）")
+    void seedWithGovernanceFieldsRejectedWhenFencingFails() {
+        doThrow(new MemoryEvalFencingException("无 fencing 行"))
+                .when(fencingRepository).lockAndValidate(USER, RUN_ID, 1L);
+
+        assertThrows(MemoryEvalFencingException.class,
+                () -> guardService.seedGuarded(USER, RUN_ID, 1L,
+                        List.of(new MemoryEvalGuardService.SeedItem(MemoryTypeVO.FACT, "内容",
+                                "用户", "tech_stack", "Java 17", 0.85, "2020-01-01T00:00:00"))));
+
+        verify(memoryRepository, never()).insert(any(MemoryRecordEntity.class));
+        verify(memoryRepository, never()).selectByUserIdAndHash(anyLong(), anyString());
+        verify(transactionManager, never()).commit(any());
     }
 }

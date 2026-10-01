@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
@@ -25,6 +26,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -32,6 +34,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -218,6 +221,36 @@ class EvalEndpointContractTest {
                     .andExpect(jsonPath("$.data.inserted").value(2))
                     .andExpect(jsonPath("$.data.existed").value(1))
                     .andExpect(jsonPath("$.data.contentToId.新语料").value(11));
+        }
+
+        @Test
+        @DisplayName("seed 反序列化治理可选字段并透传到 seedGuarded（camelCase → SeedItem）")
+        void seedDeserializesGovernanceFieldsIntoSeedItem() throws Exception {
+            when(evalGuardService.seedGuarded(eq(USER), eq(RUN_ID), any(), any()))
+                    .thenReturn(new MemoryEvalGuardService.SeedOutcome(1, 0,
+                            java.util.Map.of("语料", 11L)));
+
+            mockMvc.perform(post("/api/v1/eval/seed")
+                            .contentType(APPLICATION_JSON)
+                            .header("X-Eval-Run-Id", RUN_ID)
+                            .content("{\"evalUserId\":" + USER
+                                    + ",\"items\":[{\"type\":\"fact\",\"content\":\"语料\","
+                                    + "\"subject\":\"用户\",\"predicate\":\"tech_stack\","
+                                    + "\"value\":\"Java 17\",\"confidence\":0.85,"
+                                    + "\"expireTime\":\"2020-01-01T00:00:00\"}]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(SUCCESS));
+
+            // 锁定 JSON → DTO.Item → SeedItem 的字段映射：camelCase 字段名写错一个，
+            // 治理三类任务就会静默地再次不可达（Jackson 静默取 null，不报错）。
+            ArgumentCaptor<List<MemoryEvalGuardService.SeedItem>> captor = ArgumentCaptor.forClass(List.class);
+            verify(evalGuardService).seedGuarded(eq(USER), eq(RUN_ID), any(), captor.capture());
+            MemoryEvalGuardService.SeedItem item = captor.getValue().get(0);
+            assertEquals("用户", item.subject());
+            assertEquals("tech_stack", item.predicate());
+            assertEquals("Java 17", item.value());
+            assertEquals(0.85, item.confidence(), 0.0001);
+            assertEquals("2020-01-01T00:00:00", item.expireTime());
         }
 
         @Test
