@@ -12,6 +12,7 @@ import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryStatus;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
+import cn.sutone.ai.domain.agent.model.valobj.RetrieverParams;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.service.memory.circuit.MemoryCircuitBreaker;
 import cn.sutone.ai.domain.agent.service.memory.trace.MemoryTraceId;
@@ -258,6 +259,17 @@ public class MemoryManager {
     /** 混合检索 */
     public List<MemoryRetriever.MemoryItem> search(Long userId, String query, int topK) {
         return memoryRetriever.search(userId, query, topK);
+    }
+
+    /**
+     * 解析评测覆盖后的**生效参数**。
+     *
+     * <p>供 {@code /eval/params/resolve} 回声端点使用，与检索/注入共用
+     * {@link MemoryRetriever#resolveEvalParams}——回声必须答「检索真正会用的那套参数」，
+     * 另算一份的话护栏本身就会失真。</p>
+     */
+    public RetrieverParams resolveEvalParams(EvalParamOverrides overrides) {
+        return memoryRetriever.resolveEvalParams(overrides);
     }
 
     /** 评测检索（冻结副作用 + exact/hnsw_ef 透传 + 参数覆盖） */

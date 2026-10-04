@@ -3,9 +3,11 @@ package cn.sutone.ai.test.contract;
 import cn.sutone.ai.domain.agent.adapter.repository.IEvalFencingRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.model.exception.MemoryEvalFencingException;
+import cn.sutone.ai.domain.agent.model.valobj.EvalParamOverrides;
 import cn.sutone.ai.domain.agent.model.valobj.GovernanceDecision;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryStatus;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
+import cn.sutone.ai.domain.agent.model.valobj.RetrieverParams;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
 import cn.sutone.ai.domain.agent.service.memory.MemoryEvalGuardService;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
@@ -27,6 +29,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -112,14 +115,53 @@ class EvalEndpointContractTest {
         @Test
         @DisplayName("/params 返回参数快照并在 data 中携带检索/注入参数")
         void paramsReturnsSnapshot() throws Exception {
+            // /params 与 /params/resolve 共用 resolveEvalParams（见 toParamsDto 的注释），
+            // 所以这里必须把它 stub 掉：mock 默认返回 null，控制器会 NPE 后走 fail()
+            // 返回 0001——失败方式与「端点坏了」一模一样，排查时容易走错方向。
+            stubDefaultParams();
+
             mockMvc.perform(get("/api/v1/eval/params"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(SUCCESS))
-                    .andExpect(jsonPath("$.data.rrfK").isNumber())
-                    .andExpect(jsonPath("$.data.alpha").isNumber())
-                    .andExpect(jsonPath("$.data.beta").isNumber())
-                    .andExpect(jsonPath("$.data.injectMaxTokens").isNumber())
+                    .andExpect(jsonPath("$.data.rrfK").value(60))
+                    .andExpect(jsonPath("$.data.alpha").value(0.1))
+                    .andExpect(jsonPath("$.data.beta").value(0.1))
+                    .andExpect(jsonPath("$.data.recencyHalfLifeDays").value(30.0))
+                    .andExpect(jsonPath("$.data.profileBoost").value(0.15))
+                    .andExpect(jsonPath("$.data.minConfidence").value(0.0))
+                    .andExpect(jsonPath("$.data.injectMaxTokens").value(800))
                     .andExpect(jsonPath("$.data.vectorStore").isString());
+        }
+
+        @Test
+        @DisplayName("/params/resolve 把覆盖逐项回声；未覆盖的字段保持服务端值")
+        void resolveParamsEchoesOverrides() throws Exception {
+            // 回声端点的语义就是「回答检索真正会用的那套参数」，所以它对 overrides 的
+            // 处理必须与 /eval/search 完全相同——包括「只传一个键时其余六个不动」。
+            when(memoryManager.resolveEvalParams(any()))
+                    .thenAnswer(invocation -> {
+                        EvalParamOverrides overrides = invocation.getArgument(0);
+                        assertTrue(overrides instanceof EvalParamOverrides);
+                        // 只覆盖 alpha，其余走「服务端值」，模拟 Java 侧 resolve 的行为。
+                        return new RetrieverParams(
+                                60, overrides.alpha() != null ? overrides.alpha() : 0.1,
+                                0.1, 30.0, 0.15, 0.0, 800);
+                    });
+
+            mockMvc.perform(post("/api/v1/eval/params/resolve")
+                            .contentType(APPLICATION_JSON)
+                            .content("{\"alpha\":0.4242}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(SUCCESS))
+                    .andExpect(jsonPath("$.data.alpha").value(0.4242))
+                    .andExpect(jsonPath("$.data.beta").value(0.1))
+                    .andExpect(jsonPath("$.data.injectMaxTokens").value(800));
+        }
+
+        /** 把 resolveEvalParams stub 成「服务端当前配置」，供只读端点断言使用。 */
+        private void stubDefaultParams() {
+            when(memoryManager.resolveEvalParams(any()))
+                    .thenReturn(new RetrieverParams(60, 0.1, 0.1, 30.0, 0.15, 0.0, 800));
         }
 
         @Test

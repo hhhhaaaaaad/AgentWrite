@@ -25,6 +25,7 @@ import cn.sutone.ai.domain.agent.model.valobj.EvalParamOverrides;
 import cn.sutone.ai.domain.agent.model.valobj.GovernanceDecision;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
+import cn.sutone.ai.domain.agent.model.valobj.RetrieverParams;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
 import cn.sutone.ai.domain.agent.service.memory.MemoryEvalGuardService;
 import cn.sutone.ai.domain.agent.service.memory.MemoryManager;
@@ -361,27 +362,69 @@ public class MemoryEvalController {
     @GetMapping("/params")
     public Response<EvalParamsResponseDTO> params() {
         try {
-            MemoryProperties.Retrieval r = memoryProperties.getRetrieval();
-            MemoryProperties.Inject inj = memoryProperties.getInject();
-            EvalParamsResponseDTO dto = EvalParamsResponseDTO.builder()
-                    .vectorStore(memoryProperties.getVectorStore())
-                    .rrfK(r.getRrfK())
-                    .alpha(r.getAlpha())
-                    .beta(r.getBeta())
-                    .recencyHalfLifeDays(r.getRecencyHalfLifeDays())
-                    .profileBoost(r.getProfileBoost())
-                    .minConfidence(r.getMinConfidence())
-                    .injectMaxTokens(inj.getMaxTokens())
-                    .build();
             return Response.<EvalParamsResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())
                     .info(ResponseCode.SUCCESS.getInfo())
-                    .data(dto)
+                    .data(toParamsDto(memoryManager.resolveEvalParams(EvalParamOverrides.NONE)))
                     .build();
         } catch (Exception e) {
             log.error("eval params 失败", e);
             return fail(e);
         }
+    }
+
+    /**
+     * 参数**回声**：接收一份覆盖，返回解析后的生效参数。
+     *
+     * <p><b>为什么需要这个只读端点</b>：参数覆盖是一条「发出去可能被静默丢弃」的通道，
+     * 而静默丢弃两侧都会发生：</p>
+     * <ul>
+     *   <li>平台下发了一个本 DTO 没有的键 → Spring Boot 默认
+     *       {@code FAIL_ON_UNKNOWN_PROPERTIES=false}，Jackson **不报错、直接忽略**，
+     *       参数变成不生效；</li>
+     *   <li>本端 {@code /eval/params} 多了一个字段，平台侧的下发清单没跟上 →
+     *       新参数只进 {@code config_fingerprint} 不进执行，即本次改动要消灭的那个缺陷。</li>
+     * </ul>
+     * <p>两种都不会抛异常，只会让「看起来是参数对照实验」的报告实际测的是同一套配置。
+     * 有了回声，平台可以对**每一个**可下发键发一个带辨识度的值并断言回声里读得回来——
+     * 通道被丢弃时立刻变红，而不是几个月后从一份解释不了的指标里反推。</p>
+     *
+     * <p>实现上刻意复用 {@link MemoryManager#resolveEvalParams}——与检索/注入同一入口，
+     * 保证回声答的就是检索真正会用的那套参数。</p>
+     */
+    @PostMapping("/params/resolve")
+    public Response<EvalParamsResponseDTO> resolveParams(
+            @RequestBody(required = false) EvalParamOverridesDTO request) {
+        try {
+            return Response.<EvalParamsResponseDTO>builder()
+                    .code(ResponseCode.SUCCESS.getCode())
+                    .info(ResponseCode.SUCCESS.getInfo())
+                    .data(toParamsDto(memoryManager.resolveEvalParams(toOverrides(request))))
+                    .build();
+        } catch (Exception e) {
+            log.error("eval params resolve 失败", e);
+            return fail(e);
+        }
+    }
+
+    /**
+     * 生效参数 → 响应 DTO。{@code /params} 与 {@code /params/resolve} **共用**这一份组装，
+     * 避免两个端点各自拼字段、日后加参数时只改一处而让回声与快照对不上。
+     *
+     * <p>{@code vectorStore} 取自配置而不取自 {@link RetrieverParams}：它不在生效参数里
+     * （选 collection 属部署期选择，不支持请求级覆盖），但仍要出现在快照中参与指纹。</p>
+     */
+    private EvalParamsResponseDTO toParamsDto(RetrieverParams effective) {
+        return EvalParamsResponseDTO.builder()
+                .vectorStore(memoryProperties.getVectorStore())
+                .rrfK(effective.rrfK())
+                .alpha(effective.alpha())
+                .beta(effective.beta())
+                .recencyHalfLifeDays(effective.recencyHalfLifeDays())
+                .profileBoost(effective.profileBoost())
+                .minConfidence(effective.minConfidence())
+                .injectMaxTokens(effective.injectMaxTokens())
+                .build();
     }
 
     /**

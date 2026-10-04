@@ -137,7 +137,7 @@ public class MemoryRetriever {
         long start = System.nanoTime();
         try {
             return doSearch(userId, queryVO, topK, threshold, freezeSideEffects, exact, hnswEf,
-                    resolveParams(overrides));
+                    resolveEvalParams(overrides));
         } finally {
             metrics.recordRetrievalDuration(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         }
@@ -146,8 +146,13 @@ public class MemoryRetriever {
     /**
      * 把评测覆盖解析成生效参数。生产路径永远走 {@link RetrieverParams#from}——
      * 现取配置当前值，配置热更新后立即生效，与改造前逐位一致。
+     *
+     * <p><b>刻意做成公开入口而不是各处私有一份</b>：检索、注入、以及
+     * {@code /eval/params/resolve} 参数回声端点**共用这一个方法**。回声端点的全部价值
+     * 就在于「它回答的是检索真正会用的那套参数」——若它自己另算一份，回声就会在
+     * 解析逻辑改过之后继续报告旧结果，护栏本身变成噪声源。</p>
      */
-    private RetrieverParams resolveParams(EvalParamOverrides overrides) {
+    public RetrieverParams resolveEvalParams(EvalParamOverrides overrides) {
         RetrieverParams base = RetrieverParams.from(memoryProperties);
         return overrides == null || overrides.isEmpty() ? base : overrides.resolve(base);
     }
@@ -335,7 +340,7 @@ public class MemoryRetriever {
      */
     public RetrieveContextResult retrieveContextForEval(Long userId, MemoryRetrieveQueryVO query, int topK,
                                                         EvalParamOverrides overrides) {
-        return retrieveContextDetail(userId, query, topK, true, resolveParams(overrides));
+        return retrieveContextDetail(userId, query, topK, true, resolveEvalParams(overrides));
     }
 
     /** RRF 融合：两路排名按 1/(k+rank+1) 累加，返回按融合分降序的 id → score */
