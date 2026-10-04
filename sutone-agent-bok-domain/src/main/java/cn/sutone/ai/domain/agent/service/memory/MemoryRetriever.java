@@ -6,10 +6,12 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.adapter.repository.IRerankerClient;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
+import cn.sutone.ai.domain.agent.model.valobj.EvalParamOverrides;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.MemorySearchOptions;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
 import cn.sutone.ai.domain.agent.model.valobj.NormalizedMemoryQueryVO;
+import cn.sutone.ai.domain.agent.model.valobj.RetrieverParams;
 import cn.sutone.ai.domain.agent.model.valobj.ScoredMemory;
 import cn.sutone.ai.domain.agent.model.valobj.properties.MemoryProperties;
 import cn.sutone.ai.domain.agent.service.memory.trace.MemoryTraceId;
@@ -120,9 +122,11 @@ public class MemoryRetriever {
      * @param freezeSideEffects true 时跳过访问回写、搜索缓存读写、rerank（可复现模式）
      * @param exact             Qdrant 精确检索（null=默认近似 HNSW）
      * @param hnswEf            Qdrant hnsw_ef（null=Qdrant 默认）
+     * @param overrides         本次调用的参数覆盖（{@link EvalParamOverrides#NONE} = 按服务端配置）
      */
     public List<MemoryItem> searchForEval(Long userId, String query, int topK, double threshold,
-                                          boolean freezeSideEffects, Boolean exact, Integer hnswEf) {
+                                          boolean freezeSideEffects, Boolean exact, Integer hnswEf,
+                                          EvalParamOverrides overrides) {
         if (query == null || query.isBlank()) {
             return Collections.emptyList();
         }
@@ -132,19 +136,30 @@ public class MemoryRetriever {
                 .build();
         long start = System.nanoTime();
         try {
-            return doSearch(userId, queryVO, topK, threshold, freezeSideEffects, exact, hnswEf);
+            return doSearch(userId, queryVO, topK, threshold, freezeSideEffects, exact, hnswEf,
+                    resolveParams(overrides));
         } finally {
             metrics.recordRetrievalDuration(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
         }
     }
 
+    /**
+     * 把评测覆盖解析成生效参数。生产路径永远走 {@link RetrieverParams#from}——
+     * 现取配置当前值，配置热更新后立即生效，与改造前逐位一致。
+     */
+    private RetrieverParams resolveParams(EvalParamOverrides overrides) {
+        RetrieverParams base = RetrieverParams.from(memoryProperties);
+        return overrides == null || overrides.isEmpty() ? base : overrides.resolve(base);
+    }
+
     private List<MemoryItem> doSearch(Long userId, MemoryRetrieveQueryVO query, int topK, double threshold) {
-        return doSearch(userId, query, topK, threshold, false, null, null);
+        return doSearch(userId, query, topK, threshold, false, null, null,
+                RetrieverParams.from(memoryProperties));
     }
 
     /** 带评测选项的检索主流程：freeze 冻结副作用，exact/hnswEf 透传向量检索 */
     private List<MemoryItem> doSearch(Long userId, MemoryRetrieveQueryVO query, int topK, double threshold,
-                                      boolean freeze, Boolean exact, Integer hnswEf) {
+                                      boolean freeze, Boolean exact, Integer hnswEf, RetrieverParams params) {
         NormalizedMemoryQueryVO normalized = normalizer().normalize(query);
         String semanticQuery = normalized.getSemanticQuery();
         String lexicalQuery = normalized.getLexicalQuery();
@@ -206,17 +221,17 @@ public class MemoryRetriever {
 
         // Step 4: RRF 融合两路排名（semantic + lexical）
         List<Long> semanticRankedIds = semanticRanked.stream().map(ScoredMemory::id).toList();
-        Map<Long, Double> fused = rrfFuse(semanticRankedIds, lexicalRankedIds);
+        Map<Long, Double> fused = rrfFuse(semanticRankedIds, lexicalRankedIds, params);
 
         // Step 5: 回表加载权威元数据 + 过滤（status/过期/置信度/任务类型）
         List<MemoryRecordEntity> hits = filterHits(
                 memoryRepository.queryByIds(new ArrayList<>(fused.keySet())),
-                query != null ? query.getTaskType() : "LEGACY");
+                query != null ? query.getTaskType() : "LEGACY", params);
 
         // Step 6: RRF 粗排分 + recency/importance 重排因子 + 画像布尔 boost
         List<MemoryItem> scored = hits.stream()
                 .map(h -> new MemoryItem(h.getId(), h.getContent(),
-                        finalScore(fused.get(h.getId()), h, profileIds.contains(h.getId())),
+                        finalScore(fused.get(h.getId()), h, profileIds.contains(h.getId()), params),
                         h.getImportance(), h.getType(), h.getConfidence(),
                         h.getSourceArticleTitle(), h.getSourceArticleSummary()))
                 .sorted(Comparator.comparingDouble(MemoryItem::score).reversed())
@@ -278,14 +293,25 @@ public class MemoryRetriever {
      * 刚被访问过的记忆——注入集合变成「查询无关」，无关注入率失真（#75）。</p>
      */
     public RetrieveContextResult retrieveContextDetail(Long userId, MemoryRetrieveQueryVO query, int topK, boolean freeze) {
+        return retrieveContextDetail(userId, query, topK, freeze, RetrieverParams.from(memoryProperties));
+    }
+
+    /**
+     * 注入上下文详情（可冻结副作用 + 可覆盖参数）。
+     *
+     * <p>{@code params} 里的 {@code injectMaxTokens} 决定预算裁剪；评测路径由
+     * {@code /eval/retrieve-context} 的 overrides 解析而来，生产路径取配置当前值。</p>
+     */
+    public RetrieveContextResult retrieveContextDetail(Long userId, MemoryRetrieveQueryVO query, int topK,
+                                                       boolean freeze, RetrieverParams params) {
         String traceId = MemoryTraceId.next();
         try {
-            List<MemoryItem> memories = doSearch(userId, query, topK, DEFAULT_THRESHOLD, freeze, null, null);
+            List<MemoryItem> memories = doSearch(userId, query, topK, DEFAULT_THRESHOLD, freeze, null, null, params);
             if (memories.isEmpty()) {
                 return new RetrieveContextResult(List.of(), "", 0);
             }
             String taskType = query != null ? query.getTaskType() : "LEGACY";
-            int maxTokens = memoryProperties.getInject().getMaxTokens();
+            int maxTokens = params.injectMaxTokens();
             List<MemoryItem> budgeted = budgetByType(memories, taskType, maxTokens);
             if (budgeted.isEmpty()) {
                 return new RetrieveContextResult(List.of(), "", 0);
@@ -300,9 +326,22 @@ public class MemoryRetriever {
         }
     }
 
+    /**
+     * 评测注入上下文（带参数覆盖）。
+     *
+     * <p>恒以 {@code freeze=true} 调用，理由见 {@link #retrieveContextDetail} 的文档：
+     * 不冻结会让 {@code recordAccessAsync} 改写命中记忆的 access/importance，
+     * 这些值又喂回 {@code finalScore}，使注入集合变成「查询无关」（#75）。</p>
+     */
+    public RetrieveContextResult retrieveContextForEval(Long userId, MemoryRetrieveQueryVO query, int topK,
+                                                        EvalParamOverrides overrides) {
+        return retrieveContextDetail(userId, query, topK, true, resolveParams(overrides));
+    }
+
     /** RRF 融合：两路排名按 1/(k+rank+1) 累加，返回按融合分降序的 id → score */
-    private Map<Long, Double> rrfFuse(List<Long> semanticRankedIds, List<Long> lexicalRankedIds) {
-        int k = memoryProperties.getRetrieval().getRrfK();
+    private Map<Long, Double> rrfFuse(List<Long> semanticRankedIds, List<Long> lexicalRankedIds,
+                                      RetrieverParams params) {
+        int k = params.rrfK();
         Map<Long, Double> fused = new LinkedHashMap<>();
         for (int rank = 0; rank < semanticRankedIds.size(); rank++) {
             fused.merge(semanticRankedIds.get(rank), 1.0 / (k + rank + 1), Double::sum);
@@ -319,14 +358,14 @@ public class MemoryRetriever {
      * 融合后重排公式（P2-2）：{@code final = rrfScore + α*recencyNorm + β*importanceNorm}，
      * 命中画像候选再乘 {@code (1 + profileBoost)}（布尔 boost，不无条件置顶）。
      */
-    private double finalScore(Double rrfScore, MemoryRecordEntity record, boolean isProfile) {
-        MemoryProperties.Retrieval cfg = memoryProperties.getRetrieval();
+    private double finalScore(Double rrfScore, MemoryRecordEntity record, boolean isProfile,
+                              RetrieverParams params) {
         double base = rrfScore != null ? rrfScore : 0.0;
         double importanceNorm = clamp01(record.getImportance() != null ? record.getImportance() : 0.5);
-        double recencyNorm = computeRecencyNorm(record.getLastAccessedAt(), cfg.getRecencyHalfLifeDays());
-        double score = base + cfg.getAlpha() * recencyNorm + cfg.getBeta() * importanceNorm;
+        double recencyNorm = computeRecencyNorm(record.getLastAccessedAt(), params.recencyHalfLifeDays());
+        double score = base + params.alpha() * recencyNorm + params.beta() * importanceNorm;
         if (isProfile) {
-            score *= (1 + cfg.getProfileBoost());
+            score *= (1 + params.profileBoost());
         }
         return score;
     }
@@ -344,9 +383,10 @@ public class MemoryRetriever {
     }
 
     /** 回表后过滤（P2-3）：仅 ACTIVE、未过期、置信度达标、任务类型匹配；逐条记录过滤原因埋点 */
-    private List<MemoryRecordEntity> filterHits(List<MemoryRecordEntity> hits, String taskType) {
+    private List<MemoryRecordEntity> filterHits(List<MemoryRecordEntity> hits, String taskType,
+                                                RetrieverParams params) {
         LocalDateTime now = LocalDateTime.now();
-        double minConfidence = memoryProperties.getRetrieval().getMinConfidence();
+        double minConfidence = params.minConfidence();
         List<MemoryRecordEntity> out = new ArrayList<>(hits.size());
         for (MemoryRecordEntity r : hits) {
             if (r == null) {

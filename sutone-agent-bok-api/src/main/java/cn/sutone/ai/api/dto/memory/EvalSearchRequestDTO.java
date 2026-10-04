@@ -34,4 +34,11 @@ public class EvalSearchRequestDTO {
 
     /** Qdrant hnsw_ef 参数（null=Qdrant 默认） */
     private Integer hnswEf;
+
+    /**
+     * 本次调用的参数覆盖（null = 全部按服务端配置）。
+     * 用于「同一份数据、不同参数」的对照实验——没有它，平台改快照参数只会改变
+     * config_fingerprint 而改变不了被测系统的行为。
+     */
+    private EvalParamOverridesDTO overrides;
 }

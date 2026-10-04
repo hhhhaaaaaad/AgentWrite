@@ -124,7 +124,7 @@ class MemoryEvalControllerNamespaceTest {
     @Test
     @DisplayName("下界（base）放行——区间左闭")
     void acceptsBase() throws Exception {
-        when(memoryManager.searchForEval(anyLong(), anyString(), anyInt(), anyDouble(), anyBoolean(), any(), any()))
+        when(memoryManager.searchForEval(anyLong(), anyString(), anyInt(), anyDouble(), anyBoolean(), any(), any(), any()))
                 .thenReturn(List.of());
 
         searchWith(BASE)
@@ -135,7 +135,7 @@ class MemoryEvalControllerNamespaceTest {
     @Test
     @DisplayName("上界之内（base+range-1）放行")
     void acceptsJustBelowUpperBound() throws Exception {
-        when(memoryManager.searchForEval(anyLong(), anyString(), anyInt(), anyDouble(), anyBoolean(), any(), any()))
+        when(memoryManager.searchForEval(anyLong(), anyString(), anyInt(), anyDouble(), anyBoolean(), any(), any(), any()))
                 .thenReturn(List.of());
 
         searchWith(BASE + RANGE - 1)

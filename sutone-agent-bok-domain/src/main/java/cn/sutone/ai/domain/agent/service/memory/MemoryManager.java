@@ -7,6 +7,7 @@ import cn.sutone.ai.domain.agent.adapter.repository.IMemoryVectorStore;
 import cn.sutone.ai.domain.agent.model.entity.MemoryRecordEntity;
 import cn.sutone.ai.domain.agent.model.exception.MemoryAccessDeniedException;
 import cn.sutone.ai.domain.agent.model.valobj.EmbeddedMemoryCandidate;
+import cn.sutone.ai.domain.agent.model.valobj.EvalParamOverrides;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryRetrieveQueryVO;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryStatus;
@@ -259,10 +260,12 @@ public class MemoryManager {
         return memoryRetriever.search(userId, query, topK);
     }
 
-    /** 评测检索（冻结副作用 + exact/hnsw_ef 透传） */
+    /** 评测检索（冻结副作用 + exact/hnsw_ef 透传 + 参数覆盖） */
     public List<MemoryRetriever.MemoryItem> searchForEval(Long userId, String query, int topK, double threshold,
-                                                          boolean freezeSideEffects, Boolean exact, Integer hnswEf) {
-        return memoryRetriever.searchForEval(userId, query, topK, threshold, freezeSideEffects, exact, hnswEf);
+                                                          boolean freezeSideEffects, Boolean exact, Integer hnswEf,
+                                                          EvalParamOverrides overrides) {
+        return memoryRetriever.searchForEval(userId, query, topK, threshold, freezeSideEffects, exact, hnswEf,
+                overrides);
     }
 
     /** 评测抽取：对给定消息做 LLM 抽取，仅返回候选，不落库 */
@@ -271,15 +274,16 @@ public class MemoryManager {
         return memoryExtractor.extract(existing, messages, Collections.emptyList());
     }
 
-    /** 评测注入上下文：返回 budgeted + formatted + tokenCount */
-    public MemoryRetriever.RetrieveContextResult retrieveContextForEval(Long userId, String queryContext, int topK) {
+    /** 评测注入上下文：返回 budgeted + formatted + tokenCount（带参数覆盖） */
+    public MemoryRetriever.RetrieveContextResult retrieveContextForEval(Long userId, String queryContext, int topK,
+                                                                        EvalParamOverrides overrides) {
         MemoryRetrieveQueryVO queryVO = MemoryRetrieveQueryVO.builder()
                 .taskType("LEGACY")
                 .contentMd(queryContext)
                 .build();
         // 评测注入必须冻结副作用：否则 recordAccessAsync 会改写 access_count/last_accessed_at/importance，
         // 这些值喂回 finalScore 后使后续 query 的注入集合「查询无关」（#75）。
-        return memoryRetriever.retrieveContextDetail(userId, queryVO, topK, true);
+        return memoryRetriever.retrieveContextForEval(userId, queryVO, topK, overrides);
     }
 
     /** 为 Agent prompt 格式化记忆上下文 */

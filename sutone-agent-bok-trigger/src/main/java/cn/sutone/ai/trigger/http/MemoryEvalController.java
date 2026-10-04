@@ -14,12 +14,14 @@ import cn.sutone.ai.api.dto.memory.EvalRetrieveContextRequestDTO;
 import cn.sutone.ai.api.dto.memory.EvalRetrieveContextResponseDTO;
 import cn.sutone.ai.api.dto.memory.EvalSearchRequestDTO;
 import cn.sutone.ai.api.dto.memory.EvalSearchResponseDTO;
+import cn.sutone.ai.api.dto.memory.EvalParamOverridesDTO;
 import cn.sutone.ai.api.dto.memory.EvalSeedRequestDTO;
 import cn.sutone.ai.api.dto.memory.EvalSeedResponseDTO;
 import cn.sutone.ai.api.response.Response;
 import cn.sutone.ai.domain.agent.adapter.repository.IEvalFencingRepository;
 import cn.sutone.ai.domain.agent.adapter.repository.IMemoryMetricsPort;
 import cn.sutone.ai.domain.agent.model.exception.MemoryEvalFencingException;
+import cn.sutone.ai.domain.agent.model.valobj.EvalParamOverrides;
 import cn.sutone.ai.domain.agent.model.valobj.GovernanceDecision;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryCandidate;
 import cn.sutone.ai.domain.agent.model.valobj.MemoryTypeVO;
@@ -89,6 +91,19 @@ public class MemoryEvalController {
             throw new AppException(ResponseCode.EVAL_FORBIDDEN.getCode(),
                     "eval_user_id 越界: " + evalUserId);
         }
+    }
+
+    /**
+     * DTO → 领域覆盖对象。{@code null} 与「全字段为空」都归一到
+     * {@link EvalParamOverrides#NONE}，让下游只需判断一种「没有覆盖」的表示。
+     */
+    private EvalParamOverrides toOverrides(EvalParamOverridesDTO dto) {
+        if (dto == null) {
+            return EvalParamOverrides.NONE;
+        }
+        return new EvalParamOverrides(
+                dto.getRrfK(), dto.getAlpha(), dto.getBeta(), dto.getRecencyHalfLifeDays(),
+                dto.getProfileBoost(), dto.getMinConfidence(), dto.getInjectMaxTokens());
     }
 
     /**
@@ -189,7 +204,8 @@ public class MemoryEvalController {
             double threshold = request.getThreshold() != null ? request.getThreshold() : 0.1;
             List<MemoryRetriever.MemoryItem> items = memoryManager.searchForEval(
                     evalUserId, request.getQuery(), topK, threshold,
-                    request.isFreezeSideEffects(), request.getExact(), request.getHnswEf());
+                    request.isFreezeSideEffects(), request.getExact(), request.getHnswEf(),
+                    toOverrides(request.getOverrides()));
             List<EvalSearchResponseDTO.Item> dtos = items.stream()
                     .map(m -> EvalSearchResponseDTO.Item.builder()
                             .id(m.id())
@@ -257,7 +273,7 @@ public class MemoryEvalController {
             }
             int topK = request.getTopK() > 0 ? request.getTopK() : 5;
             MemoryRetriever.RetrieveContextResult r = memoryManager.retrieveContextForEval(
-                    evalUserId, request.getQueryContext(), topK);
+                    evalUserId, request.getQueryContext(), topK, toOverrides(request.getOverrides()));
             return Response.<EvalRetrieveContextResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())
                     .info(ResponseCode.SUCCESS.getInfo())

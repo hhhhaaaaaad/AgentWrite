@@ -155,7 +155,7 @@ class EvalEndpointContractTest {
         @DisplayName("正常响应：items 携带 content 供 contentHash 匹配")
         void returnsItemsWithContent() throws Exception {
             when(memoryManager.searchForEval(eq(USER), anyString(), anyInt(), anyDouble(),
-                    anyBoolean(), any(), any()))
+                    anyBoolean(), any(), any(), any()))
                     .thenReturn(List.of(new MemoryRetriever.MemoryItem(
                             7L, "记忆内容", 0.91, 0.5, MemoryTypeVO.FACT, 0.8, null, null)));
 
@@ -419,7 +419,7 @@ class EvalEndpointContractTest {
         @Test
         @DisplayName("retrieve-context 正常响应携带 formatted / tokenCount / budgetedIds")
         void retrieveContextReturnsBudgetDetail() throws Exception {
-            when(memoryManager.retrieveContextForEval(eq(USER), anyString(), anyInt()))
+            when(memoryManager.retrieveContextForEval(eq(USER), anyString(), anyInt(), any()))
                     .thenReturn(new MemoryRetriever.RetrieveContextResult(
                             List.of(new MemoryRetriever.MemoryItem(
                                     3L, "上下文", 0.9, 0.5, MemoryTypeVO.FACT, 0.8, null, null)),

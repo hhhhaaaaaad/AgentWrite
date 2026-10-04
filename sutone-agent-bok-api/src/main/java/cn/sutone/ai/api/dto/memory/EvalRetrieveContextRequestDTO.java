@@ -20,4 +20,7 @@ public class EvalRetrieveContextRequestDTO {
 
     /** 检索 topK，默认 5 */
     private int topK = 5;
+
+    /** 本次调用的参数覆盖（null = 全部按服务端配置）；injectMaxTokens 决定注入预算 */
+    private EvalParamOverridesDTO overrides;
 }
