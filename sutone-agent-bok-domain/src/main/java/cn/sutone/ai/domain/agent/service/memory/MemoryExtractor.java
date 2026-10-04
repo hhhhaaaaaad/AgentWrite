@@ -144,7 +144,25 @@ public class MemoryExtractor {
         // 调用 LLM（System 铁律 + User 数据，拆两条消息）
         String llmResponse = callLlm(systemPrompt, userPrompt);
         if (llmResponse == null || llmResponse.isBlank()) {
-            log.info("MemoryExtractor LLM 返回空");
+            // ⚠️ **「空白响应」不等于「模型返回空数组」，两者的含义相反。**
+            //
+            // prompt 明确要求返回 JSON，所以一个正常工作的模型**至少会返回 `[]`**。
+            // 拿到 null/空白说明这次调用**没成功**（空补全、被截断、或 callLlm 内部
+            // 把错误吞掉了）——那是故障，不是「这段对话没什么可记的」。
+            //
+            // 原先记在 info 级，于是它与「模型确实抽不出东西」在日志里长得一样，
+            // 在上层也完全同形：`extractForEval` 返回空列表 → 评测端点回
+            // `0000 + []` → 平台记为「抽取 0 条、零误抽」。
+            //
+            // **这个混淆会直接毁掉抽取维度的测量**：一次瞬时 LLM 故障会被读成
+            // 「模型认为这段对话没有值得记住的内容」，在负样本上尤其危险——
+            // 负样本的期望本来就「一条都不抽」，于是**坏掉的 LLM 反而让指标更漂亮**。
+            //
+            // 这里先只把级别提到 WARN 并写明区别（**不改行为**：抛异常会让业务侧
+            // 的瞬时抖动升级成写记忆失败，那是另一个需要单独决策的问题）。
+            // 评测路径是否该把空白当失败上报，见 docs/extraction-calibration.md。
+            log.warn("MemoryExtractor LLM 返回空白响应（调用未成功，非「模型返回空数组」）——"
+                    + "本次按空结果返回，但请勿据此认为该对话无可抽取内容");
             return Collections.emptyList();
         }
         log.info("MemoryExtractor LLM 原始响应 (前200字符): {}", llmResponse.substring(0, Math.min(200, llmResponse.length())));
