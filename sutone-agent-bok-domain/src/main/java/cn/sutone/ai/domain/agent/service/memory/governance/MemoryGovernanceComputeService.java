@@ -117,6 +117,33 @@ public class MemoryGovernanceComputeService {
     /**
      * 事实一致性决策：按 (user_id, subject, predicate) 聚合 ACTIVE 记忆，
      * 同 predicate 异 value 的互斥对 → 保留最早创建行，其余产出 DISPUTED 决策。
+     *
+     * <p><b>⚠️ 本方法在当前写入路径的不变量下结构性不可达，恒定返回空列表。</b>
+     * 不是「碰巧没触发」，是「不可能触发」。证据是两条，恰好互为反面：</p>
+     *
+     * <ol>
+     *   <li><b>数据库层</b>：唯一索引 {@code uk_user_sp_active} 建在生成列 {@code active_sp_uk} 上，
+     *       该列的定义是「{@code status='ACTIVE' 且 subject/predicate 非空} 的行取
+     *       {@code CONCAT_WS('|', user_id, subject, predicate)}」——
+     *       也就是说<b>每个 (user, subject, predicate) 最多只允许一条 ACTIVE 行</b>。</li>
+     *   <li><b>本方法层</b>：下面 filter 的非空条件与 groupingBy 拼出的键
+     *       （{@code userId|subject|predicate}）<b>与上面那个生成列逐字段相同</b>。</li>
+     * </ol>
+     *
+     * <p>两者合起来，分组大小恒 ≤ 1，于是 {@code if (group.size() < 2) continue;} <b>恒成立</b>，
+     * 永远走不到产出决策的分支。</p>
+     *
+     * <p><b>为什么保留代码而不是删掉</b>：它实现的是「允许冲突事实并存 + 事后巡检检出」这一设计，
+     * 而当前系统选的是「写入期消解」（靠唯一索引压根不让第二条写进来）。
+     * <b>这两种设计互斥，不能同时成立</b>，必须二选一。本方法正是前一种设计下该有的实现，
+     * 删掉它等于把这个选项从代码里抹掉。若将来决定放宽不变量（允许并存），
+     * 本方法无需改动即可生效；<b>但在那之前，它不该被任何人当作「一致性正在被巡检」。</b></p>
+     *
+     * <p><b>对应的守护测试</b>：
+     * {@code cn.sutone.ai.test.integration.GovernanceConsistencyInvariantTest}
+     * 直接对真实 MySQL 连写两条冲突 ACTIVE 行并断言被唯一索引拒绝。
+     * <b>若哪天有人移除了那个索引，那条测试会变红</b>——它就是在提醒：设计变了，
+     * 本方法从死代码变成活代码，需要同步复核调用方（定时任务 / 评测 replay）与评测集。</p>
      */
     public List<GovernanceDecision> computeConsistency() {
         // userId 传 null = 扫全库，同 computeDuplicates 的理由。

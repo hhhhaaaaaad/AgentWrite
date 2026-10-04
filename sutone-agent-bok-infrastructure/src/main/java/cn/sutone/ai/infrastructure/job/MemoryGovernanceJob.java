@@ -66,7 +66,18 @@ public class MemoryGovernanceJob {
         }
     }
 
-    /** 事实一致性巡检（每周一 4:00）：compute 找同 predicate 异 value → apply 软标记 DISPUTED */
+    /**
+     * 事实一致性巡检（每周一 4:00）：compute 找同 predicate 异 value → apply 软标记 DISPUTED。
+     *
+     * <p><b>⚠️ 本任务在当前不变量下是「结构性空转」</b>：{@code computeConsistency()} 恒定返回空，
+     * 所以它每周都会打印「0 条」。原因见该方法的 javadoc（唯一索引 {@code uk_user_sp_active}
+     * 与它的分组键互斥，分组大小恒 ≤ 1）。</p>
+     *
+     * <p><b>为什么保留这次调用，而不是干脆摘掉</b>：这个调用是「万一将来放宽不变量，
+     * 本任务自动生效」的开关。若这里改成直接跳过，将来一旦允许冲突事实并存，
+     * <b>本任务会静默地永远不工作</b>——那比现在更糟，因为它把「将来能修好」
+     * 变成了「将来没人知道要去修」。所以保留调用，但<b>让日志说实话</b>。</p>
+     */
     @Scheduled(cron = "0 0 4 ? * MON")
     public void checkFactConsistency() {
         long begin = System.currentTimeMillis();
@@ -74,7 +85,14 @@ public class MemoryGovernanceJob {
         try {
             List<GovernanceDecision> decisions = computeService.computeConsistency();
             int marked = applyService.apply(decisions);
-            log.info("[governance:fact-consistency] 完成，软标记 DISPUTED {} 条（{} 组），耗时 {}ms",
+            // 这句原先只说「完成，软标记 DISPUTED N 条（M 组）」——读起来像「查过了，很干净」，
+            // 而真相是「这个检查在当前设计下不可能发现问题」。两者对看日志的人含义完全相反：
+            // 前者说「治理健康」，后者说「这一项根本没在测」。所以显式标注 0 是**预期结果**。
+            log.info("[governance:fact-consistency] 完成，软标记 DISPUTED {} 条（{} 组），耗时 {}ms"
+                            + "｜注意：0 条是**预期结果**——本巡检在当前写入不变量下结构性不可达"
+                            + "（唯一索引 uk_user_sp_active 与分组键互斥），"
+                            + "详见 computeConsistency 的 javadoc。"
+                            + "它变非 0 反而说明不变量被放开了，需同步复核调用方与评测集",
                     marked, decisions.size(), System.currentTimeMillis() - begin);
         } catch (Exception e) {
             log.error("[governance:fact-consistency] 失败", e);

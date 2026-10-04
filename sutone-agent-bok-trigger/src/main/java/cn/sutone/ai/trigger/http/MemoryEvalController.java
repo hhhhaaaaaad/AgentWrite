@@ -453,6 +453,14 @@ public class MemoryEvalController {
                 decisions.addAll(governanceComputeService.computeDuplicates());
             }
             if (request.isConsistency()) {
+                // 恒为空：computeConsistency 在当前写入不变量下结构性不可达（见其 javadoc）。
+                // 保留本分支，是为了让「请求 consistency 任务」得到**诚实的空结果**而不是报错。
+                //
+                // ⚠️ 但平台侧**不得**据此得出「一致性零问题」：期望空 + 实际空 会让治理评估器
+                // 打出「零误判 / 零误伤」的满分，而实际上这项检查一次都没执行过。
+                // 评测集因此已不含 consistency case（见 eval-platform 的
+                // docs/governance-reachability.md）。若哪天本分支开始返回非空，
+                // 说明不变量被放开了——那时才应该把该 case 加回评测集。
                 decisions.addAll(governanceComputeService.computeConsistency());
             }
             if (request.isExpired()) {

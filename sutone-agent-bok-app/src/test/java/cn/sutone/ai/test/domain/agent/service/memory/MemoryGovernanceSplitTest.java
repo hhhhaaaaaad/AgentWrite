@@ -113,8 +113,20 @@ class MemoryGovernanceSplitTest {
         }
 
         @Test
-        @DisplayName("事实一致性：留最早行，其余产出 DISPUTE 决策，不落库")
+        @DisplayName("事实一致性【算法本身】：留最早行，其余产出 DISPUTE 决策，不落库")
         void consistencyDisputesAllButEarliest() {
+            // ⚠️ 读这条测试时请分清它**证明了什么、没证明什么**——这个区分是本项目踩过的坑。
+            //
+            // 它 mock 掉了 repository，直接构造出「同一个 (user=100, subject=user, predicate=city)
+            // 下两条 ACTIVE、value 不同（北京/上海）」的状态。而这个状态**在真实库里不可能存在**：
+            // 唯一索引 uk_user_sp_active 会把第二条直接拒掉（键是 user_id|subject|predicate，
+            // 不含 value，所以同键的第二行无论 value 是否相同都进不来）。
+            //
+            // 于是本测试实际证明的是：**假如**存在冲突行，computeConsistency 的排序与产出逻辑是对的。
+            // 它**不能**证明「一致性巡检在生产环境能工作」——恰恰相反，那个前提正是被它 mock 掉的。
+            // 原先的 @DisplayName 只写「事实一致性：留最早行…」，极易被读成后者，从而让一段
+            // 结构性不可达的死代码长期看起来「有测试覆盖、是绿的」。
+            // 真实不变量由 GovernanceConsistencyInvariantTest（真实 MySQL）守护。
             LocalDateTime base = LocalDateTime.of(2026, 1, 1, 0, 0);
             MemoryRecordEntity earliest = MemoryRecordEntity.builder()
                     .id(1L).userId(100L).type(MemoryTypeVO.FACT).content("A")
@@ -139,8 +151,10 @@ class MemoryGovernanceSplitTest {
         }
 
         @Test
-        @DisplayName("事实一致性：同 predicate 同 value 不产生决策")
+        @DisplayName("事实一致性【算法本身】：同 predicate 同 value 不产生决策")
         void consistencySkipsWhenValuesAgree() {
+            // 同 consistencyDisputesAllButEarliest：这里 mock 出的「同键两行」在真实库里
+            // 同样不可能存在（唯一键不含 value，同键第二行一律被拒）。测的仍是算法分支本身。
             LocalDateTime base = LocalDateTime.of(2026, 1, 1, 0, 0);
             MemoryRecordEntity a = MemoryRecordEntity.builder()
                     .id(1L).userId(100L).type(MemoryTypeVO.FACT).subject("user").predicate("city")
