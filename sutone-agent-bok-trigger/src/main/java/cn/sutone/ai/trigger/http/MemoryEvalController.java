@@ -436,6 +436,9 @@ public class MemoryEvalController {
             EvalMetricsResponseDTO dto = EvalMetricsResponseDTO.builder()
                     .extractionRejectRate(metrics.getExtractionRejectRate())
                     .vectorSyncPendingCount(metrics.getVectorSyncPendingCount())
+                    // 分原因的驳回明细。注意是**进程内累计值**而不是本次 run 的——
+                    // 平台要拿某次 run 的增量就得取前后两次的差，见 DTO 上的说明。
+                    .extractionRejectedByReason(metrics.getExtractionRejectedByReason())
                     .build();
             return Response.<EvalMetricsResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())

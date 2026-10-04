@@ -9,6 +9,8 @@ import io.micrometer.core.instrument.Timer;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -210,6 +212,37 @@ public class MemoryMetrics implements IMemoryMetricsPort {
     @Override
     public double getExtractionRejectRate() {
         return extractionRejectRate;
+    }
+
+    /**
+     * 按原因统计的抽取驳回次数。
+     *
+     * <p><b>从 Micrometer 的带 tag 计数器读，而不是自己再维护一份 Map</b>：带
+     * {@code reason} tag 的那个 Counter 已经是权威计数（由
+     * {@link #incrementExtractionRejected} 写入），另存一份就是同一事实的第二份副本。
+     * 两份迟早会不一致，而不一致时**没有任何机制能告诉你哪份是对的**。</p>
+     *
+     * <p>先铺 {@link #REJECT_REASONS} 全集并零填充：`missing` 与 `0` 必须区分得开，
+     * 理由见该常量的说明。循环里用 {@code merge} 而不是 {@code put}，于是**注册表里出现了
+     * 不在全集内的原因时会被如实带出来**——那通常意味着有人写了个新原因却忘了登记，
+     * 悄悄吞掉它只会让平台少看到一类问题。</p>
+     *
+     * <p>计数是进程内累计值，不是 per-run 的；调用方要算某次 run 的增量需自行取差。</p>
+     */
+    @Override
+    public Map<String, Long> getExtractionRejectedByReason() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (String reason : REJECT_REASONS) {
+            counts.put(reason, 0L);
+        }
+        for (Counter counter : meterRegistry.find("memory.extraction.rejected").counters()) {
+            String reason = counter.getId().getTag("reason");
+            if (reason == null) {
+                continue;
+            }
+            counts.merge(reason, (long) counter.count(), Long::sum);
+        }
+        return counts;
     }
 
     /**

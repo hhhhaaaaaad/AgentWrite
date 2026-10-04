@@ -1,5 +1,7 @@
 package cn.sutone.ai.domain.agent.adapter.repository;
 
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -15,6 +17,42 @@ import java.util.function.Supplier;
  * 首月仅埋点不告警，先收集基线再按阈值启用（「先埋点后调阈值」）。</p>
  */
 public interface IMemoryMetricsPort {
+
+    /**
+     * 抽取驳回原因常量。
+     *
+     * <p><b>为什么集中定义而不是散落字面量</b>：驳回明细要按原因上报给评测平台，而
+     * 「某个原因计数为 0」与「这个原因根本不存在」在输出里必须能区分——前者是
+     * 「跑了很多次都没出现这种情况」，后者是「这个原因压根没实现」。要能区分，
+     * 端点就得知道**原因全集**，也就必须有一个集中定义处。顺带也挡住
+     * 「把 too_long 拼成 toolong」这类错——它只会让某一类计数静静地少统计，
+     * 表面看一切正常。</p>
+     */
+    String REJECT_TOO_LONG = "too_long";
+
+    /** 抽出的候选类型不在 {@code MemoryTypeVO} 白名单内。 */
+    String REJECT_INVALID_TYPE = "invalid_type";
+
+    /**
+     * 抽取驳回原因全集。
+     *
+     * <p><b>新增驳回分支时必须加进来</b>，否则它不会出现在
+     * {@link #getExtractionRejectedByReason()} 的返回里，评测平台看这个原因就像
+     * 「从未发生过」。</p>
+     */
+    List<String> REJECT_REASONS = List.of(REJECT_TOO_LONG, REJECT_INVALID_TYPE);
+
+    /**
+     * 按原因统计的抽取驳回次数。
+     *
+     * <p>返回 {@link #REJECT_REASONS} 的**全集**（从未出现过的原因计 0），
+     * 理由见该常量的说明。</p>
+     *
+     * <p><b>计数是进程内累计值，不是 per-run 的。</b> 要得到「某一次 run 期间驳回了多少」，
+     * 调用方必须取 run 前后两次的差；直接读会把进程启动以来的全部历史算进去，
+     * 包括此前每一次评测和排查。</p>
+     */
+    Map<String, Long> getExtractionRejectedByReason();
 
     /**
      * 记录一次 Qdrant 操作失败。
@@ -40,7 +78,9 @@ public interface IMemoryMetricsPort {
     /**
      * 记录一条被驳回的抽取候选。
      *
-     * @param reason 驳回原因，如 too_long / invalid_type / low_confidence / no_evidence
+     * @param reason 驳回原因，取值必须是 {@link #REJECT_REASONS} 之一
+     *               （原文档曾列出 low_confidence / no_evidence，但那两个分支从未实现，
+     *               列在这里会让人以为存在对应的统计）
      */
     void incrementExtractionRejected(String reason);
 

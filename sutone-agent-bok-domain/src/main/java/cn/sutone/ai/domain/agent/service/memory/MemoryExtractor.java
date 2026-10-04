@@ -370,11 +370,11 @@ public class MemoryExtractor {
                 // 校验
                 int maxLen = memoryProperties != null ? memoryProperties.getExtraction().getMaxContentLength() : 500;
                 if (text == null || text.isBlank() || text.length() > maxLen) {
-                    metrics.incrementExtractionRejected("too_long");
+                    metrics.incrementExtractionRejected(IMemoryMetricsPort.REJECT_TOO_LONG);
                     continue;
                 }
                 if (!MemoryTypeVO.isValid(type)) {
-                    metrics.incrementExtractionRejected("invalid_type");
+                    metrics.incrementExtractionRejected(IMemoryMetricsPort.REJECT_INVALID_TYPE);
                     continue;
                 }
 
