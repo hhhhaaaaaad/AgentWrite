@@ -273,7 +273,23 @@ public interface IMemoryRecordDao {
     List<MemoryRecordPO> selectExpiredForArchive(
             @Param("before") LocalDateTime before, @Param("userId") Long userId);
 
-    /** P3 治理: 抽样 confidence 落在 [min,max] 灰色地带的 ACTIVE 记忆（供幻觉抽检）。{@code userId} 语义同上。 */
+    /**
+     * P3 治理: 抽样 confidence 落在 [min,max] 灰色地带的 ACTIVE 记忆（供幻觉抽检）。{@code userId} 语义同上。
+     *
+     * <p><b>{@code ORDER BY RAND()} 有个前提，改 {@code HALLUCINATION_SAMPLE_LIMIT} 前先读这里</b>：
+     * 当前 limit 是 100，而实际落在这个置信度带里的记忆通常只有几条——
+     * 于是「随机取 N 条」退化成「全取、只是顺序随机」。顺序无害（评估器按多重集匹配决策签名），
+     * 所以它现在**不构成问题**。</p>
+     *
+     * <p>但带内条数一旦超过 limit，语义就从「全取」变成「真·随机抽样」，同一批语料重放会
+     * 抽到不同子集，而 {@code /eval/governance/replay} 的契约承诺是「重放结果必须一致」
+     * （见 {@code MemoryEvalController} 的 replay javadoc）。届时要么把 limit 调到大于
+     * 带内条数，要么把这里的随机换成确定性顺序。</p>
+     *
+     * <p>顺带记一个易踩的前提：{@code confidence} 列默认 NULL，而 SQL 里 {@code NULL >= 0.8}
+     * 不为真，所以**没显式给 confidence 的记忆根本不进这个带**——「带里只有几条」不只是
+     * 数据少，也是这个过滤条件的结果。</p>
+     */
     @Select("""
             <script>
             SELECT id, user_id, type, content, content_hash, content_tokenized, source_session_id, importance, access_count, last_accessed_at, create_time, update_time, is_deleted, attributed_to, confidence, expire_time, subject, predicate, `value`, evidence, trace_id, operation, version, status, valid_from, valid_to, next_retry_at, last_error, source_article_id, source_article_title, source_article_summary

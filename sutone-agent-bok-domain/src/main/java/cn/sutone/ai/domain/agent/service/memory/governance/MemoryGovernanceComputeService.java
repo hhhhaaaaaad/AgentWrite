@@ -89,9 +89,23 @@ public class MemoryGovernanceComputeService {
      * 产出「非代表行 → MERGE_PENDING」决策，合并目标为代表行。
      */
     public List<GovernanceDecision> computeDuplicates() {
-        // userId 传 null = 扫全库：治理 job 本就要处理所有用户。与 samples() 的
-        // 强制 userId 形成对照——那里是**对外导出内容**，这里是**内部计算决策**。
-        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForDuplicateScan(null);
+        // 生产治理任务扫全库：它本就要处理所有用户。与 samples() 的强制 userId 形成对照
+        // ——那里是**对外导出内容**，这里是**内部计算决策**。
+        return computeDuplicates(null);
+    }
+
+    /**
+     * @param userId {@code null} = 扫全库（生产治理任务）；非 null = 只扫该用户（评测按命名空间作用域）。
+     *
+     *               <p><b>为什么需要按用户这一档</b>：平台侧调 {@code /eval/governance/replay}
+     *               时期望的是「只算本次 run 那个命名空间的决策」。此前该端点接收
+     *               {@code evalUserId} 却只用于越界校验，实际扫描仍是全库——于是别的命名空间
+     *               （例如一次失败 run 留下的行）会混进本次的结果，被平台按「实际决策」计入，
+     *               解析不到内容就退化成 {@code i:<id>} 而永远匹配不上期望，**虚高误伤率**
+     *               （{@code false_action_rate} / {@code wrong_*_rate}）。</p>
+     */
+    public List<GovernanceDecision> computeDuplicates(Long userId) {
+        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForDuplicateScan(userId);
         if (actives == null || actives.isEmpty()) {
             return List.of();
         }
@@ -146,8 +160,13 @@ public class MemoryGovernanceComputeService {
      * 本方法从死代码变成活代码，需要同步复核调用方（定时任务 / 评测 replay）与评测集。</p>
      */
     public List<GovernanceDecision> computeConsistency() {
-        // userId 传 null = 扫全库，同 computeDuplicates 的理由。
-        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForConsistencyScan(null);
+        // 生产扫全库，同 computeDuplicates 的理由。
+        return computeConsistency(null);
+    }
+
+    /** @param userId {@code null} = 扫全库；非 null = 只扫该用户（评测按命名空间作用域）。 */
+    public List<GovernanceDecision> computeConsistency(Long userId) {
+        List<MemoryRecordEntity> actives = memoryRepository.selectActiveForConsistencyScan(userId);
         if (actives == null || actives.isEmpty()) {
             return List.of();
         }
@@ -188,8 +207,13 @@ public class MemoryGovernanceComputeService {
      * → 产出 ARCHIVED 决策。
      */
     public List<GovernanceDecision> computeExpired() {
+        return computeExpired(null);
+    }
+
+    /** @param userId {@code null} = 扫全库；非 null = 只扫该用户（评测按命名空间作用域）。 */
+    public List<GovernanceDecision> computeExpired(Long userId) {
         LocalDateTime inactiveBefore = LocalDateTime.now().minusDays(EXPIRED_INACTIVE_DAYS);
-        List<MemoryRecordEntity> expired = memoryRepository.selectExpiredForArchive(inactiveBefore, null);
+        List<MemoryRecordEntity> expired = memoryRepository.selectExpiredForArchive(inactiveBefore, userId);
         if (expired == null || expired.isEmpty()) {
             return List.of();
         }
@@ -206,9 +230,14 @@ public class MemoryGovernanceComputeService {
      * 不支撑者产出 QUARANTINED 决策。
      */
     public List<GovernanceDecision> computeHallucination() {
+        return computeHallucination(null);
+    }
+
+    /** @param userId {@code null} = 扫全库；非 null = 只扫该用户（评测按命名空间作用域）。 */
+    public List<GovernanceDecision> computeHallucination(Long userId) {
         List<MemoryRecordEntity> samples = memoryRepository.selectSampleForHallucinationCheck(
                 HALLUCINATION_MIN_CONFIDENCE, HALLUCINATION_MAX_CONFIDENCE,
-                HALLUCINATION_SAMPLE_LIMIT, null);
+                HALLUCINATION_SAMPLE_LIMIT, userId);
         if (samples == null || samples.isEmpty()) {
             return List.of();
         }

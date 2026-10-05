@@ -394,7 +394,7 @@ class EvalEndpointContractTest {
         @Test
         @DisplayName("replay 返回决策列表且只调 compute 层")
         void replayReturnsDecisions() throws Exception {
-            when(governanceComputeService.computeExpired())
+            when(governanceComputeService.computeExpired(eq(USER)))
                     .thenReturn(List.of(new GovernanceDecision("ARCHIVE", null, "过期",
                             List.of(new GovernanceDecision.Item(9L,
                                     MemoryStatus.ACTIVE.getCode(), MemoryStatus.ARCHIVED.getCode())))));
@@ -409,6 +409,30 @@ class EvalEndpointContractTest {
                     .andExpect(jsonPath("$.data[0].action").value("ARCHIVE"))
                     .andExpect(jsonPath("$.data[0].items[0].memoryId").value(9))
                     .andExpect(jsonPath("$.data[0].items[0].afterStatus").value("ARCHIVED"));
+        }
+
+        @Test
+        @DisplayName("replay 把 evalUserId 透传给四类扫描（按命名空间作用域，而非全库）")
+        void replayScopesEveryScanToEvalUser() throws Exception {
+            // 这条断言的是**作用域**，不是返回内容。
+            //
+            // 端点此前接收 evalUserId 却只用它做越界校验，四类扫描一律传 null = 全库；
+            // 于是别的命名空间（例如一次失败 run 留下的行）会混进本次结果，被平台按
+            // 「实际决策」计入。那些记忆的内容解析不到，id 退化成 `i:<id>` 与任何期望都
+            // 匹配不上 → **虚高误伤率**（false_action_rate / wrong_*_rate）。
+            //
+            // 返回内容是对的、测试也会全绿——所以这里必须断言**参数**而不是结果。
+            mockMvc.perform(post("/api/v1/eval/governance/replay")
+                            .contentType(APPLICATION_JSON)
+                            .content("{\"evalUserId\":" + USER + ",\"duplicates\":true,"
+                                    + "\"consistency\":true,\"expired\":true,\"hallucination\":true}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(SUCCESS));
+
+            verify(governanceComputeService).computeDuplicates(USER);
+            verify(governanceComputeService).computeConsistency(USER);
+            verify(governanceComputeService).computeExpired(USER);
+            verify(governanceComputeService).computeHallucination(USER);
         }
 
         @Test

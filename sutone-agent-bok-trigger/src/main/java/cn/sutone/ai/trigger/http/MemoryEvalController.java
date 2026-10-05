@@ -510,9 +510,16 @@ public class MemoryEvalController {
     public Response<List<GovernanceDecision>> governanceReplay(@RequestBody EvalGovernanceReplayRequestDTO request) {
         try {
             validateEvalUserId(request.getEvalUserId());
+            // 把 evalUserId 透传下去，让四类扫描**只作用于本次 run 的命名空间**。
+            //
+            // 此前它只用于上面的越界校验，扫描仍是全库——而别的命名空间（例如一次失败 run
+            // 留下的行）会混进结果，被平台按「实际决策」计入；解析不到内容的 id 退化成
+            // `i:<id>`、与任何期望都匹配不上，于是**虚高误伤率**。生产治理任务不受影响：
+            // 它们直接调无参的 compute*()，仍是全库巡检。
+            Long evalUserId = request.getEvalUserId();
             List<GovernanceDecision> decisions = new ArrayList<>();
             if (request.isDuplicates()) {
-                decisions.addAll(governanceComputeService.computeDuplicates());
+                decisions.addAll(governanceComputeService.computeDuplicates(evalUserId));
             }
             if (request.isConsistency()) {
                 // 恒为空：computeConsistency 在当前写入不变量下结构性不可达（见其 javadoc）。
@@ -523,13 +530,13 @@ public class MemoryEvalController {
                 // 评测集因此已不含 consistency case（见 eval-platform 的
                 // docs/governance-reachability.md）。若哪天本分支开始返回非空，
                 // 说明不变量被放开了——那时才应该把该 case 加回评测集。
-                decisions.addAll(governanceComputeService.computeConsistency());
+                decisions.addAll(governanceComputeService.computeConsistency(evalUserId));
             }
             if (request.isExpired()) {
-                decisions.addAll(governanceComputeService.computeExpired());
+                decisions.addAll(governanceComputeService.computeExpired(evalUserId));
             }
             if (request.isHallucination()) {
-                decisions.addAll(governanceComputeService.computeHallucination());
+                decisions.addAll(governanceComputeService.computeHallucination(evalUserId));
             }
             return Response.<List<GovernanceDecision>>builder()
                     .code(ResponseCode.SUCCESS.getCode())
