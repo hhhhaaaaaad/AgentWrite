@@ -75,6 +75,15 @@ memory:
     vector-size: 1024
     # 评测实例使用专用 Qdrant collection（与业务 agent_memory 隔离）
     collection: agent_memory_eval
+    # 评测实例开：写操作等 Qdrant 索引完再返回。
+    #
+    # Qdrant 默认 wait=false 时接口返回只代表「已接受」，点要索引完成后才可被搜到；
+    # 而平台的 VECTOR_READY 屏障读的是 MySQL 侧的「已上传」计数——那是「已接受」、
+    # 不是「可搜性」。两边一错位，屏障可能在索引完成前就放行。
+    #
+    # 生产不承担这个代价（同步任务批量补偿时每次写都等索引会明显变慢），
+    # 评测的写入是一次性的几十到几百个点，可忽略。
+    wait-for-indexing: true
   reranker:
     enabled: false
     base-url: ${MEMORY_RERANKER_BASE_URL:https://api.siliconflow.cn/v1}

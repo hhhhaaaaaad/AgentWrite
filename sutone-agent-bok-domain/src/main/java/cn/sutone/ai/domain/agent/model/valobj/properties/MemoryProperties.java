@@ -29,6 +29,19 @@ public class MemoryProperties {
         private String collection = "agent_memory";
         /** 向量维度，不配则自动探测 */
         private Integer vectorSize;
+        /**
+         * 写操作是否等 Qdrant 把点索引完再返回（默认 false = Qdrant 自己的默认）。
+         *
+         * <p><b>为什么默认关</b>：开启后每次 upsert/delete 都要等索引，向量同步任务做批量
+         * 补偿时会明显变慢。生产路径不承担这个代价。</p>
+         *
+         * <p><b>为什么评测实例要开</b>：Qdrant 的 {@code wait=false} 意味着接口返回只代表
+         * 「已接受」（响应里 {@code result.status = acknowledged}），点要**索引完成后才可被搜到**。
+         * 而评测的 VECTOR_READY 屏障读的是 MySQL 侧的「已上传」计数——那是「已接受」、
+         * 不是「可搜性」，于是屏障可能在索引完成前就放行。评测的写入是一次性的
+         * 几十到几百个点，等索引的代价可忽略。</p>
+         */
+        private boolean waitForIndexing = false;
     }
 
     @Data

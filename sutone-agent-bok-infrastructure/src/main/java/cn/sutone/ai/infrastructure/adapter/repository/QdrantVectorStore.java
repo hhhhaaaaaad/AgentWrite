@@ -101,7 +101,7 @@ public class QdrantVectorStore implements IMemoryVectorStore {
     @Override
     public void upsert(Long memoryId, Long userId, float[] embedding, String content, String contentHash) {
         try {
-            String url = baseUrl + "/collections/" + collectionName + "/points";
+            String url = pointWriteUrl("/points");
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("user_id", userId);
             payload.put("content", content);
@@ -131,7 +131,9 @@ public class QdrantVectorStore implements IMemoryVectorStore {
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            rest.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
+            ResponseEntity<String> resp =
+                    rest.exchange(url, HttpMethod.PUT, new HttpEntity<>(body, headers), String.class);
+            requireApplied("upsert", resp.getBody());
         } catch (Exception e) {
             log.error("Qdrant upsert failed id={}: {}", memoryId, e.getMessage());
             memoryMetrics.incrementQdrantFailure("upsert");
@@ -219,11 +221,13 @@ public class QdrantVectorStore implements IMemoryVectorStore {
     @Override
     public void delete(Long memoryId) {
         try {
-            String url = baseUrl + "/collections/" + collectionName + "/points/delete";
+            String url = pointWriteUrl("/points/delete");
             Map<String, Object> body = Map.of("points", List.of(memoryId));
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            rest.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            ResponseEntity<String> resp =
+                    rest.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            requireApplied("delete", resp.getBody());
         } catch (Exception e) {
             log.error("Qdrant delete failed id={}: {}", memoryId, e.getMessage());
             memoryMetrics.incrementQdrantFailure("delete");
@@ -234,7 +238,7 @@ public class QdrantVectorStore implements IMemoryVectorStore {
     @Override
     public void removeByUserId(Long userId) {
         try {
-            String url = baseUrl + "/collections/" + collectionName + "/points/delete";
+            String url = pointWriteUrl("/points/delete");
             Map<String, Object> mustFilter = Map.of(
                     "key", "user_id",
                     "match", Map.of("value", userId)
@@ -242,11 +246,59 @@ public class QdrantVectorStore implements IMemoryVectorStore {
             Map<String, Object> body = Map.of("filter", Map.of("must", List.of(mustFilter)));
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            rest.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            ResponseEntity<String> resp =
+                    rest.exchange(url, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            requireApplied("removeByUserId", resp.getBody());
         } catch (Exception e) {
             log.error("Qdrant removeByUserId failed userId={}: {}", userId, e.getMessage());
             memoryMetrics.incrementQdrantFailure("delete_by_user");
             throw new MemoryVectorStoreException("qdrant removeByUserId failed userId=" + userId, e);
+        }
+    }
+
+    /**
+     * 点写操作的 URL。{@code memory.qdrant.wait-for-indexing=true} 时追加 {@code ?wait=true}。
+     *
+     * <p><b>不缓存这个开关</b>：每次从 {@code memoryProperties} 现读。本类的
+     * {@code baseUrl}/{@code collectionName} 是在 {@code init()} 里取一次的（改配置要重启），
+     * 但那是部署期常量；这个开关是行为开关，不重复那个坑——同一个项目里已经有过一次
+     * 「构造期读一次导致无法按需改变」的教训（{@code MemoryEmbeddingClient.maxContentLength}）。</p>
+     */
+    private String pointWriteUrl(String path) {
+        String url = baseUrl + "/collections/" + collectionName + path;
+        return memoryProperties.getQdrant().isWaitForIndexing() ? url + "?wait=true" : url;
+    }
+
+    /**
+     * 校验写操作**真的被应用**了，而不只是被接受。
+     *
+     * <p>这三个写方法原先都把响应体丢掉（{@code rest.exchange(..., String.class)} 不看返回值），
+     * 于是「已接受」与「已应用」在代码里完全同形——**「写入没生效」这件事从来没有机会被观测到**。
+     * Qdrant 的响应里本来就有答案（{@code result.status}），只是没人读。</p>
+     *
+     * <p>仅在开启 {@code wait-for-indexing} 时校验：未开启时 {@code status} 本就返回
+     * {@code acknowledged}，那是**预期行为**不是异常，不该报错。</p>
+     *
+     * <p>实测（Qdrant 1.19.1）：{@code ?wait=true} → {@code status: completed}；
+     * 不带该参数或参数名写错 → {@code acknowledged}，两者耗时可差 55 倍。所以「HTTP 200」
+     * 什么都证明不了，{@code status} 才是证据。</p>
+     */
+    private void requireApplied(String op, String responseBody) {
+        if (!memoryProperties.getQdrant().isWaitForIndexing()) {
+            return;
+        }
+        String status;
+        try {
+            JSONObject result = JSON.parseObject(responseBody).getJSONObject("result");
+            status = result != null ? result.getString("status") : null;
+        } catch (Exception e) {
+            log.warn("Qdrant {} 响应无法解析，不能确认写入是否已应用: {}", op, responseBody);
+            return;
+        }
+        if (!"completed".equals(status)) {
+            throw new MemoryVectorStoreException(
+                    "qdrant " + op + " 返回 status=" + status + "（开启 wait-for-indexing 时期望 completed）"
+                            + "——写入未被确认应用，此刻检索可能看不到它");
         }
     }
 
